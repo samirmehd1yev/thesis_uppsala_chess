@@ -1,0 +1,35 @@
+# Database Configuration
+database:
+  path: data/processed/chess_games.db
+  type: sqlite
+
+# Model Parameters
+model:
+  n_clusters: 5
+  random_state: 42
+
+# Feature Engineering
+features:
+  min_games_per_player: 20
+  analysis_depth: 20
+
+# Analysis Parameters
+analysis:
+  time_period:
+    start_year: 1950
+    end_year: 2023
+  min_elo: 2000
+
+# Paths
+paths:
+  raw_data: data/raw
+  processed_data: data/processed
+  interim_data: data/interim
+  models: models/trained
+  results: results
+  figures: reports/figures
+
+# Logging
+logging:
+  level: INFO
+  file: logs/analysis.log
