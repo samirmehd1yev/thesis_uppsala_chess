@@ -1,10 +1,5 @@
 # Chess Player Type Analysis Thesis
 
-Research on chess player types and playing styles using machine learning techniques.
-
-## Project Overview
-This project analyzes chess games to identify and classify different player types and playing styles. It processes chess game data, extracts relevant features, and uses machine learning to cluster players based on their playing characteristics.
-
 ## Project Structure
 
 - `src/`: Source code
@@ -45,10 +40,6 @@ This project analyzes chess games to identify and classify different player type
 
 - `logs/`: Log files
 
-## Requirements
-- Python 3.8+
-- Required packages listed in `requirements.txt`
-
 ## Setup
 
 1. Create virtual environment:
@@ -62,26 +53,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-3. Set up the database:
-```bash
-python src/data_processing/csv_to_sql.py
-```
+## Usage
 
-## Data Processing Pipeline
-1. Game data processing: `src/data_processing/pgn_processor.py`
-2. Feature extraction: `src/feature_engineering/game_features.py`
-3. Analysis and clustering: `src/model/cluster.py`
-
-## Analysis Reports
-Analysis results and visualizations can be found in:
-- `reports/figures/`: Visual analysis of chess positions and player styles
-- `results/`: Generated analysis files and figures
-- `notebooks/reports/`: Detailed analysis notebooks
-
-## Contributing
-1. Create a new branch for your feature
-2. Write tests in the `tests/` directory
-3. Submit a pull request
-
-## Project Status
-Active development - Part of thesis research at Uppsala University
+[Add usage instructions here]

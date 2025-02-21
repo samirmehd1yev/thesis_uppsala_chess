@@ -1,0 +1,191 @@
+# src/features/extractor.py
+import chess
+import chess.pgn
+from typing import Dict, List
+import numpy as np
+from models.data_classes import FeatureVector, Info
+from models.enums import Judgment
+from analysis.phase_detector import GamePhaseDetector
+from analysis.move_analyzer import MoveAnalyzer
+
+class FeatureExtractor:
+    def __init__(self):
+        self.phase_detector = GamePhaseDetector()
+        
+    def extract_features(self, game: chess.pgn.Game, evals: List[Info] = None) -> FeatureVector:
+        """Extract all features from a game"""
+        features = FeatureVector()
+        
+        # Get positions and phases
+        positions = self._get_positions(game)
+        mg_start, eg_start = self.phase_detector.find_phase_transitions(positions)
+        total_moves = len(positions) // 2
+        features.total_moves = total_moves
+
+        # Case analysis:
+        # 1. No phases detected (mg_start = 0, eg_start = 0) -> All moves are opening
+        # 2. Only middlegame detected (mg_start > 0, eg_start = 0) -> Opening + Middlegame
+        # 3. Both phases detected (mg_start > 0, eg_start > 0) -> All three phases
+
+        if mg_start == 0:
+            # Case 1: Game never left opening phase
+            features.opening_length = total_moves
+            features.middlegame_length = 0
+            features.endgame_length = 0
+        elif eg_start == 0:
+            # Case 2: Game only reached middlegame
+            features.opening_length = mg_start - 1
+            features.middlegame_length = total_moves - (mg_start - 1)
+            features.endgame_length = 0
+        else:
+            # Case 3: Game reached all phases
+            features.opening_length = mg_start - 1
+            features.middlegame_length = eg_start - mg_start
+            features.endgame_length = total_moves - eg_start + 1
+        
+        # Material and position features
+        features.material_balance_changes = self._calculate_material_changes(positions)
+        features.piece_mobility_avg = self._calculate_mobility(positions)
+        features.pawn_structure_changes = self._calculate_pawn_changes(positions)
+        features.center_control_avg = self._calculate_center_control(positions)
+        
+        # Calculate quality metrics if evaluations available
+        if evals and len(evals) > 1:
+            self._calculate_quality_metrics(evals, features)
+        
+        return features
+        
+    def _get_positions(self, game: chess.pgn.Game) -> List[chess.Board]:
+        """Get list of positions from game"""
+        positions = []
+        board = game.board()
+        
+        for move in game.mainline_moves():
+            positions.append(board.copy())
+            board.push(move)
+            
+        positions.append(board.copy())
+        return positions
+        
+    def _calculate_material_changes(self, positions: List[chess.Board]) -> float:
+        """Calculate rate of material balance changes"""
+        material_values = {
+            chess.PAWN: 1,
+            chess.KNIGHT: 3,
+            chess.BISHOP: 3,
+            chess.ROOK: 5,
+            chess.QUEEN: 9
+        }
+        
+        changes = 0
+        for i in range(1, len(positions)):
+            prev_mat = self._get_material_value(positions[i-1], material_values)
+            curr_mat = self._get_material_value(positions[i], material_values)
+            if prev_mat != curr_mat:
+                changes += 1
+                
+        return changes / (len(positions) - 1) if len(positions) > 1 else 0
+    
+    def _get_material_value(self, board: chess.Board, values: Dict) -> int:
+        """Get total material value on board"""
+        total = 0
+        for piece_type, value in values.items():
+            total += len(board.pieces(piece_type, chess.WHITE)) * value
+            total -= len(board.pieces(piece_type, chess.BLACK)) * value
+        return total
+    
+    def _calculate_mobility(self, positions: List[chess.Board]) -> float:
+        """Calculate average piece mobility"""
+        total_mobility = 0
+        for board in positions:
+            mobility = len(list(board.legal_moves))
+            total_mobility += mobility
+            
+        return total_mobility / len(positions) if positions else 0
+    
+    def _calculate_pawn_changes(self, positions: List[chess.Board]) -> float:
+        """Calculate rate of pawn structure changes"""
+        changes = 0
+        for i in range(1, len(positions)):
+            prev_pawns = self._get_pawn_structure(positions[i-1])
+            curr_pawns = self._get_pawn_structure(positions[i])
+            if prev_pawns != curr_pawns:
+                changes += 1
+                
+        return changes / (len(positions) - 1) if len(positions) > 1 else 0
+    
+    def _get_pawn_structure(self, board: chess.Board) -> int:
+        """Get pawn structure hash"""
+        white_pawns = board.pieces(chess.PAWN, chess.WHITE)
+        black_pawns = board.pieces(chess.PAWN, chess.BLACK)
+        return white_pawns | (black_pawns << 32)
+    
+    def _calculate_center_control(self, positions: List[chess.Board]) -> float:
+        """Calculate average center square control"""
+        center_squares = {chess.E4, chess.E5, chess.D4, chess.D5}
+        total_control = 0
+        
+        for board in positions:
+            control = 0
+            for square in center_squares:
+                if board.piece_at(square):
+                    control += 1
+            total_control += control / len(center_squares)
+            
+        return total_control / len(positions) if positions else 0
+        
+    def _calculate_quality_metrics(self, evals: List[Info], features: FeatureVector) -> None:
+        """Calculate move quality related features and statistics for both players"""
+        judgments = {'White': [], 'Black': []}
+        eval_changes = {'White': [], 'Black': []}
+        
+        # Skip first evaluation as we need pairs to analyze moves
+        for i in range(1, len(evals)):
+            prev, curr = evals[i-1], evals[i]
+            is_white = (i - 1) % 2 == 0  # Even indices are White's moves
+            color = 'White' if is_white else 'Black'
+            
+            # Get move quality
+            judgment = MoveAnalyzer.analyze_move(prev, curr)
+            print(f'{prev.eval_comment()} -> {curr.eval_comment()} = {judgment}')
+            
+            # Always append a judgment (GOOD is default)
+            judgments[color].append(judgment)
+            
+            # Track eval changes
+            if prev.cp is not None and curr.cp is not None:
+                # Get raw eval change
+                eval_change = curr.cp - prev.cp
+                # For Black's moves, we need to negate the change to get their perspective
+                if not is_white:
+                    eval_change = -eval_change
+                eval_changes[color].append(eval_change)
+
+        
+        
+        # Process White's moves
+        total_white = len(judgments['White'])
+        features.white_blunder_count = sum(1 for j in judgments['White'] if j == Judgment.BLUNDER)
+        features.white_mistake_count = sum(1 for j in judgments['White'] if j == Judgment.MISTAKE)
+        features.white_inaccuracy_count = sum(1 for j in judgments['White'] if j == Judgment.INACCURACY)
+        features.white_good_moves = total_white - (features.white_blunder_count + 
+                                                features.white_mistake_count + 
+                                                features.white_inaccuracy_count)
+        
+        # Process Black's moves
+        total_black = len(judgments['Black'])
+        features.black_blunder_count = sum(1 for j in judgments['Black'] if j == Judgment.BLUNDER)
+        features.black_mistake_count = sum(1 for j in judgments['Black'] if j == Judgment.MISTAKE)
+        features.black_inaccuracy_count = sum(1 for j in judgments['Black'] if j == Judgment.INACCURACY)
+        features.black_good_moves = total_black - (features.black_blunder_count + 
+                                                features.black_mistake_count + 
+                                                features.black_inaccuracy_count)
+        
+        # Calculate eval metrics
+        if eval_changes['White']:
+            features.white_avg_eval_change = np.mean(eval_changes['White'])
+            features.white_eval_volatility = np.std(eval_changes['White'])
+        
+        if eval_changes['Black']:
+            features.black_avg_eval_change = np.mean(eval_changes['Black'])
+            features.black_eval_volatility = np.std(eval_changes['Black'])
