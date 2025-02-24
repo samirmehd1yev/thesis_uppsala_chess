@@ -1,3 +1,4 @@
+# src/models/data_classes.py
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 import numpy as np
@@ -10,11 +11,11 @@ class Info:
     Attributes:
         ply (int): The ply number (half-move count) in the game
         eval (dict): The evaluation dictionary from Stockfish
-        variation (List[str], optional): The list of best moves
+        variation (List[Dict], optional): The list of best moves with their evaluations
     """
     ply: int
     eval: dict  # Stockfish evaluation
-    variation: List[str] = None
+    variation: List[Dict] = None
     
     @property
     def color(self) -> bool:
@@ -39,6 +40,24 @@ class Info:
             return f"{self.cp/100:+.1f}"
         return None
 
+    def get_best_move(self) -> Optional[str]:
+        """Get the best move in UCI format"""
+        if self.variation and len(self.variation) > 0:
+            return self.variation[0].get("Move")
+        return None
+
+    def get_move_eval(self, move_idx: int) -> Optional[int]:
+        """Get evaluation for a specific move variation"""
+        if self.variation and len(self.variation) > move_idx:
+            move_info = self.variation[move_idx]
+            if "Centipawn" in move_info:
+                return move_info["Centipawn"]
+            elif "Mate" in move_info:
+                # Convert mate score to high centipawn value
+                mate_in = move_info["Mate"]
+                return 10000 if mate_in > 0 else -10000
+        return None
+
 @dataclass
 class FeatureVector:
     """Feature vector for clustering"""
@@ -54,18 +73,22 @@ class FeatureVector:
     pawn_structure_changes: float = 0.0
     
     # Move Quality Features - White
-    white_blunder_count: float = 0.0
-    white_mistake_count: float = 0.0
-    white_inaccuracy_count: float = 0.0
+    white_brilliant_count: float = 0.0
+    white_great_count: float = 0.0
     white_good_moves: float = 0.0
+    white_inaccuracy_count: float = 0.0
+    white_mistake_count: float = 0.0
+    white_blunder_count: float = 0.0
     white_avg_eval_change: float = 0.0
     white_eval_volatility: float = 0.0
     
     # Move Quality Features - Black
-    black_blunder_count: float = 0.0
-    black_mistake_count: float = 0.0
-    black_inaccuracy_count: float = 0.0
+    black_brilliant_count: float = 0.0
+    black_great_count: float = 0.0
     black_good_moves: float = 0.0
+    black_inaccuracy_count: float = 0.0
+    black_mistake_count: float = 0.0
+    black_blunder_count: float = 0.0
     black_avg_eval_change: float = 0.0
     black_eval_volatility: float = 0.0
     

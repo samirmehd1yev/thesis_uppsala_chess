@@ -14,6 +14,12 @@ class FeatureExtractor:
         
     def extract_features(self, game: chess.pgn.Game, evals: List[Info] = None) -> FeatureVector:
         """Extract all features from a game"""
+        if game is None:
+            raise ValueError("Game cannot be None")
+            
+        if evals is not None and not isinstance(evals, list):
+            raise TypeError("evals must be a list of Info objects")
+            
         features = FeatureVector()
         
         # Get positions and phases
@@ -21,27 +27,11 @@ class FeatureExtractor:
         mg_start, eg_start = self.phase_detector.find_phase_transitions(positions)
         total_moves = len(positions) // 2
         features.total_moves = total_moves
-
-        # Case analysis:
-        # 1. No phases detected (mg_start = 0, eg_start = 0) -> All moves are opening
-        # 2. Only middlegame detected (mg_start > 0, eg_start = 0) -> Opening + Middlegame
-        # 3. Both phases detected (mg_start > 0, eg_start > 0) -> All three phases
-
-        if mg_start == 0:
-            # Case 1: Game never left opening phase
-            features.opening_length = total_moves
-            features.middlegame_length = 0
-            features.endgame_length = 0
-        elif eg_start == 0:
-            # Case 2: Game only reached middlegame
-            features.opening_length = mg_start - 1
-            features.middlegame_length = total_moves - (mg_start - 1)
-            features.endgame_length = 0
-        else:
-            # Case 3: Game reached all phases
-            features.opening_length = mg_start - 1
-            features.middlegame_length = eg_start - mg_start
-            features.endgame_length = total_moves - eg_start + 1
+        
+        opening_length, middlegame_length, endgame_length = self._phase_length(mg_start, eg_start, total_moves)
+        features.opening_length = opening_length
+        features.middlegame_length = middlegame_length
+        features.endgame_length = endgame_length
         
         # Material and position features
         features.material_balance_changes = self._calculate_material_changes(positions)
@@ -51,9 +41,34 @@ class FeatureExtractor:
         
         # Calculate quality metrics if evaluations available
         if evals and len(evals) > 1:
-            self._calculate_quality_metrics(evals, features)
+            self._calculate_quality_metrics(game, positions, evals, features)
         
         return features
+    
+    def _phase_length(self, mg_start: int, eg_start: int, total_moves: int) -> tuple[float, float, float]:
+        """Calculate length of each game phase"""
+        # Case analysis:
+        # 1. No phases detected (mg_start = 0, eg_start = 0) -> All moves are opening
+        # 2. Only middlegame detected (mg_start > 0, eg_start = 0) -> Opening + Middlegame
+        # 3. Both phases detected (mg_start > 0, eg_start > 0) -> All three phases
+        
+        if mg_start == 0:
+            # Case 1: Game never left opening phase
+            opening_length = float(total_moves)
+            middlegame_length = 0.0
+            endgame_length = 0.0
+        elif eg_start == 0:
+            # Case 2: Game only reached middlegame
+            opening_length = float(mg_start - 1)
+            middlegame_length = float(total_moves - (mg_start - 1))
+            endgame_length = 0.0
+        else:
+            # Case 3: Game reached all phases
+            opening_length = float(mg_start - 1)
+            middlegame_length = float(eg_start - mg_start)
+            endgame_length = float(total_moves - eg_start + 1)
+        
+        return opening_length, middlegame_length, endgame_length
         
     def _get_positions(self, game: chess.pgn.Game) -> List[chess.Board]:
         """Get list of positions from game"""
@@ -69,6 +84,9 @@ class FeatureExtractor:
         
     def _calculate_material_changes(self, positions: List[chess.Board]) -> float:
         """Calculate rate of material balance changes"""
+        if not positions:
+            return 0.0
+            
         material_values = {
             chess.PAWN: 1,
             chess.KNIGHT: 3,
@@ -134,58 +152,73 @@ class FeatureExtractor:
             
         return total_control / len(positions) if positions else 0
         
-    def _calculate_quality_metrics(self, evals: List[Info], features: FeatureVector) -> None:
+    def _calculate_quality_metrics(self, game: chess.pgn.Game, positions: List[chess.Board], evals: List[Info], features: FeatureVector) -> None:
         """Calculate move quality related features and statistics for both players"""
+        if len(positions) == 0:
+            return
+            
+        if len(evals) < 2:
+            return
+            
+        moves = list(game.mainline_moves())
+        if len(moves) == 0:
+            return
+            
         judgments = {'White': [], 'Black': []}
         eval_changes = {'White': [], 'Black': []}
         
         # Skip first evaluation as we need pairs to analyze moves
         for i in range(1, len(evals)):
+            if i-1 >= len(moves):
+                break
+                
             prev, curr = evals[i-1], evals[i]
             is_white = (i - 1) % 2 == 0  # Even indices are White's moves
             color = 'White' if is_white else 'Black'
             
-            # Get move quality
-            judgment = MoveAnalyzer.analyze_move(prev, curr)
-            print(f'{prev.eval_comment()} -> {curr.eval_comment()} = {judgment}')
+            # Get move and board state
+            board = positions[i-1]
+            move = moves[i-1]
             
-            # Always append a judgment (GOOD is default)
+            # Get move quality
+            judgment = MoveAnalyzer.analyze_move(prev, curr, board, move)
             judgments[color].append(judgment)
             
             # Track eval changes
             if prev.cp is not None and curr.cp is not None:
-                # Get raw eval change
+                # Get raw eval change from current player's perspective
                 eval_change = curr.cp - prev.cp
-                # For Black's moves, we need to negate the change to get their perspective
+                # For Black's moves, negate the change to get their perspective
                 if not is_white:
                     eval_change = -eval_change
                 eval_changes[color].append(eval_change)
-
         
-        
+        # Fix: Calculate counts normalized by total moves for each side
         # Process White's moves
         total_white = len(judgments['White'])
-        features.white_blunder_count = sum(1 for j in judgments['White'] if j == Judgment.BLUNDER)
-        features.white_mistake_count = sum(1 for j in judgments['White'] if j == Judgment.MISTAKE)
-        features.white_inaccuracy_count = sum(1 for j in judgments['White'] if j == Judgment.INACCURACY)
-        features.white_good_moves = total_white - (features.white_blunder_count + 
-                                                features.white_mistake_count + 
-                                                features.white_inaccuracy_count)
+        if total_white > 0:  # Avoid division by zero
+            features.white_brilliant_count = sum(1 for j in judgments['White'] if j == Judgment.BRILLIANT) / total_white
+            features.white_great_count = sum(1 for j in judgments['White'] if j == Judgment.GREAT) / total_white
+            features.white_blunder_count = sum(1 for j in judgments['White'] if j == Judgment.BLUNDER) / total_white
+            features.white_mistake_count = sum(1 for j in judgments['White'] if j == Judgment.MISTAKE) / total_white
+            features.white_inaccuracy_count = sum(1 for j in judgments['White'] if j == Judgment.INACCURACY) / total_white
+            features.white_good_moves = sum(1 for j in judgments['White'] if j == Judgment.GOOD) / total_white
         
         # Process Black's moves
         total_black = len(judgments['Black'])
-        features.black_blunder_count = sum(1 for j in judgments['Black'] if j == Judgment.BLUNDER)
-        features.black_mistake_count = sum(1 for j in judgments['Black'] if j == Judgment.MISTAKE)
-        features.black_inaccuracy_count = sum(1 for j in judgments['Black'] if j == Judgment.INACCURACY)
-        features.black_good_moves = total_black - (features.black_blunder_count + 
-                                                features.black_mistake_count + 
-                                                features.black_inaccuracy_count)
+        if total_black > 0:  # Avoid division by zero
+            features.black_brilliant_count = sum(1 for j in judgments['Black'] if j == Judgment.BRILLIANT) / total_black
+            features.black_great_count = sum(1 for j in judgments['Black'] if j == Judgment.GREAT) / total_black
+            features.black_blunder_count = sum(1 for j in judgments['Black'] if j == Judgment.BLUNDER) / total_black
+            features.black_mistake_count = sum(1 for j in judgments['Black'] if j == Judgment.MISTAKE) / total_black
+            features.black_inaccuracy_count = sum(1 for j in judgments['Black'] if j == Judgment.INACCURACY) / total_black
+            features.black_good_moves = sum(1 for j in judgments['Black'] if j == Judgment.GOOD) / total_black
         
-        # Calculate eval metrics
+        # Calculate eval metrics with proper perspective normalization
         if eval_changes['White']:
-            features.white_avg_eval_change = np.mean(eval_changes['White'])
+            features.white_avg_eval_change = abs(np.mean(eval_changes['White']))
             features.white_eval_volatility = np.std(eval_changes['White'])
         
         if eval_changes['Black']:
-            features.black_avg_eval_change = np.mean(eval_changes['Black'])
+            features.black_avg_eval_change = abs(np.mean(eval_changes['Black']))
             features.black_eval_volatility = np.std(eval_changes['Black'])
