@@ -1,3 +1,4 @@
+# src/models/enums.py
 from enum import Enum
 
 class GamePhase(Enum):
@@ -6,7 +7,9 @@ class GamePhase(Enum):
     ENDGAME = "endgame"
 
 class Judgment(Enum):
+    BRILLIANT = "Brilliant"  # New
+    GREAT = "Great"  # New
+    GOOD = "Good"
     INACCURACY = "Inaccuracy"
     MISTAKE = "Mistake"
     BLUNDER = "Blunder"
-    GOOD = "Good"

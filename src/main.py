@@ -73,11 +73,14 @@ class ChessAnalyzer:
         mistakes = 0
         blunders = 0
         inaccuracies = 0
+        good=0
         total = len(evals) - 1  # -1 because we compare pairs
 
         for i in range(1, len(evals)):
             judgment = MoveAnalyzer.analyze_move(evals[i-1], evals[i])
-            if judgment == Judgment.BLUNDER:
+            if judgment == Judgment.GOOD:
+                good+=1
+            elif judgment == Judgment.BLUNDER:
                 blunders += 1
             elif judgment == Judgment.MISTAKE:
                 mistakes += 1
@@ -85,7 +88,7 @@ class ChessAnalyzer:
                 inaccuracies += 1
 
         return {
-            'accuracy': (total - blunders - mistakes - inaccuracies) / total * 100,
+            'accuracy': good / total * 100,
             'blunder_rate': blunders / total * 100,
             'mistake_rate': mistakes / total * 100,
             'inaccuracy_rate': inaccuracies / total * 100
