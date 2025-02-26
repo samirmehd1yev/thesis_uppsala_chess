@@ -7,8 +7,8 @@ class GamePhase(Enum):
     ENDGAME = "endgame"
 
 class Judgment(Enum):
-    BRILLIANT = "Brilliant"
-    GREAT = "Great"
+    BRILLIANT = "Brilliant"  # New
+    GREAT = "Great"  # New
     GOOD = "Good"
     INACCURACY = "Inaccuracy"
     MISTAKE = "Mistake"
