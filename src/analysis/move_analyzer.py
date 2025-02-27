@@ -1,6 +1,6 @@
 # src/analysis/move_analyzer.py
 import math
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 import chess
 from models.data_classes import Info
 from models.enums import Judgment
@@ -71,15 +71,6 @@ class MoveAnalyzer:
     def is_only_good_move(prev_board: chess.Board, move: chess.Move, top_moves: List[str], prev_eval: Optional[Info] = None) -> bool:
         """
         Determine if the played move was the only good move in the position
-        
-        Args:
-            prev_board: Board state before the move
-            move: The move that was played
-            top_moves: List of top moves in UCI format from Stockfish analysis
-            prev_eval: Optional Info object containing evaluation data
-            
-        Returns:
-            True if the played move was the only good move, False otherwise
         """
         if not top_moves or len(top_moves) < 2 or not prev_board or not move:
             return False
@@ -124,7 +115,10 @@ class MoveAnalyzer:
             if len(top_moves) >= 2:
                 # Get board after making the top move
                 top_move_board = prev_board.copy()
-                top_move_board.push(chess.Move.from_uci(top_moves[0]))
+                try:
+                    top_move_board.push(chess.Move.from_uci(top_moves[0]))
+                except ValueError:
+                    return False  # Invalid move format
                 
                 # Count legal moves after best move
                 top_move_legal_moves = list(top_move_board.legal_moves)
@@ -158,15 +152,12 @@ class MoveAnalyzer:
         except Exception as e:
             logger.warning(f"Error checking if move is the only good move: {e}")
             return False
+
     @staticmethod
     def move_complexity(prev_board: chess.Board, move: chess.Move) -> float:
         """
         Calculate the complexity/difficulty of finding a move
         
-        Args:
-            prev_board: Board state before the move
-            move: The move that was played
-            
         Returns:
             Complexity score (0-1), where higher means more complex
         """
@@ -198,14 +189,11 @@ class MoveAnalyzer:
             destination_rank = chess.square_rank(move.to_square)
             destination_file = chess.square_file(move.to_square)
             if 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
-                # Center squares
-                complexity += 0.0
+                pass  # Center squares, no complexity added
             elif destination_rank in [0, 7] or destination_file in [0, 7]:
-                # Edge squares
-                complexity += 0.1
+                complexity += 0.1  # Edge squares
             else:
-                # In-between
-                complexity += 0.15
+                complexity += 0.15  # In-between
                 
             # Factor 5: Is the piece already under attack?
             if prev_board.is_attacked_by(not prev_board.turn, move.from_square):
@@ -216,6 +204,67 @@ class MoveAnalyzer:
         except Exception as e:
             logger.warning(f"Error calculating move complexity: {e}")
             return 0.0
+        
+    @staticmethod
+    def _check_brilliant_conditions(
+        prev: Info, 
+        curr: Info, 
+        prev_board: chess.Board,
+        curr_board: chess.Board,
+        move: chess.Move
+    ) -> Tuple[bool, str]:
+        """Helper method to check brilliant move conditions"""
+        # Check if this creates a mate sequence with a piece sacrifice
+        if curr.mate is not None and curr.mate > 0 and \
+           MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
+            return True, " | BRILLIANT: Creates mate sequence with piece sacrifice"
+            
+        # Check for BRILLIANT move (good piece sacrifice)
+        if prev.cp is not None and curr.cp is not None and \
+           MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
+            # Ensure position is not already totally winning and not losing after
+            if (prev.color and prev.cp < 300 and curr.cp > -100) or \
+               (not prev.color and prev.cp > -300 and curr.cp < 100):
+                return True, " | BRILLIANT: Good piece sacrifice from non-winning position"
+                
+        return False, ""
+        
+    @staticmethod
+    def _check_great_conditions(
+        prev: Info,
+        curr: Info,
+        prev_board: chess.Board,
+        move: chess.Move,
+        top_moves: List[str],
+        move_difficulty: float = 0.0
+    ) -> Tuple[bool, str]:
+        """Helper method to check great move conditions"""
+        if prev.cp is None or curr.cp is None:
+            return False, ""
+            
+        is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
+        
+        # Case 1: Difficult and only good move
+        if move_difficulty > 0.3 and is_only_good:
+            return True, f" | GREAT: Only good move in a complex position (complexity={move_difficulty:.2f})"
+        
+        # Case 2: Turns losing into equal/winning
+        if (prev.color and prev.cp < -150 and curr.cp > -50) or \
+           (not prev.color and prev.cp > 150 and curr.cp < 50):
+            return True, f" | GREAT: Turns losing position into equal/winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
+        
+        # Case 3: Turns equal into clearly winning
+        if (prev.color and abs(prev.cp) < 50 and curr.cp > 200) or \
+           (not prev.color and abs(prev.cp) < 50 and curr.cp < -200):
+            return True, f" | GREAT: Turns equal position into clearly winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
+        
+        # Case 4: Maintains winning advantage in complex position
+        if move_difficulty > 0.4 and \
+           ((prev.color and prev.cp > 200 and curr.cp > 180) or \
+            (not prev.color and prev.cp < -200 and curr.cp < -180)):
+            return True, f" | GREAT: Maintains winning advantage in complex position (complexity={move_difficulty:.2f})"
+            
+        return False, ""
         
     @staticmethod
     def analyze_move_with_top_moves(
@@ -230,15 +279,6 @@ class MoveAnalyzer:
         """
         Enhanced move analysis taking into account top engine moves
         
-        Args:
-            prev: Info for position before the move
-            curr: Info for position after the move
-            prev_board: Board state before the move
-            curr_board: Board state after the move
-            move: The move that was played
-            top_moves: List of top moves from Stockfish in UCI format
-            debug: Whether to return debugging information
-            
         Returns:
             Tuple of (Judgment, debug_reason) where debug_reason explains the judgment
         """
@@ -250,96 +290,43 @@ class MoveAnalyzer:
         try:
             # Check if move was forced (only one legal move)
             is_forced = False
+            reason = ""
+            
             if prev_board:
                 legal_moves = list(prev_board.legal_moves)
                 is_forced = len(legal_moves) == 1
-                
-            # Debug string to capture reasoning
-            reason = ""
-            if is_forced:
-                reason = "FORCED MOVE: Only one legal move available"
+                if is_forced:
+                    reason = "FORCED MOVE: Only one legal move available"
             
-            # If the move was forced, it can't be a blunder/mistake/inaccuracy
-            if is_forced:
-                # If it's the only move, it's always "GOOD" at minimum
-                # It could still be BRILLIANT or GREAT if it satisfies other criteria
-                default_judgment = Judgment.GOOD
-            else:
-                # For non-forced moves, continue with normal evaluation
-                default_judgment = None
-                
             # Check if move is in top engine moves
             is_top_move = False
             if move and top_moves and move.uci() == top_moves[0]:
                 is_top_move = True
                 reason += " | TOP MOVE: Matches engine's first choice"
                 
-                # Handle mate scores first
-                if curr.mate is not None:
-                    # Check if this creates a mate sequence with a piece sacrifice
-                    if curr.mate > 0 and prev_board and curr_board and move:
-                        if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
-                            reason += " | BRILLIANT: Creates mate sequence with piece sacrifice"
-                            return (Judgment.BRILLIANT, reason)
-                    
-                # If we're here, neither position has a mate score
-                
-                # Check for BRILLIANT move (good piece sacrifice)
-                if prev_board and curr_board and move and prev.cp is not None and curr.cp is not None:
-                    if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
-                        # Ensure position is not already totally winning and not losing after
-                        if (prev.color and prev.cp < 300 and curr.cp > -100) or \
-                        (not prev.color and prev.cp > -300 and curr.cp < 100):
-                            reason += " | BRILLIANT: Good piece sacrifice from non-winning position"
-                            return (Judgment.BRILLIANT, reason)
-                
-                # Enhanced GREAT move detection
-                move_difficulty = MoveAnalyzer.move_complexity(prev_board, move) if prev_board and move else 0.0
-                
-                # A move is GREAT if it meets at least one of these criteria:
-                # 1. It's a difficult move (complexity > 0.3) AND it's the only good move
-                # 2. It turns a losing position into equal/winning
-                # 3. It turns an equal position into clearly winning
-                # 4. It maintains a winning advantage in a complex position
-                
-                is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev) if prev_board and move and top_moves else False
-                
-                if prev.cp is not None and curr.cp is not None:
-                    # Calculate position improvement
-                    position_improvement = curr.cp - prev.cp if prev.color else prev.cp - curr.cp
-                    
-                    # Case 1: Difficult and only good move
-                    if move_difficulty > 0.3 and is_only_good:
-                        reason += f" | GREAT: Only good move in a complex position (complexity={move_difficulty:.2f})"
-                        return (Judgment.GREAT, reason)
-                    
-                    # Case 2: Turns losing into equal/winning
-                    if (prev.color and prev.cp < -150 and curr.cp > -50) or \
-                       (not prev.color and prev.cp > 150 and curr.cp < 50):
-                        reason += f" | GREAT: Turns losing position into equal/winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
-                        return (Judgment.GREAT, reason)
-                    
-                    # Case 3: Turns equal into clearly winning
-                    if (prev.color and abs(prev.cp) < 50 and curr.cp > 200) or \
-                       (not prev.color and abs(prev.cp) < 50 and curr.cp < -200):
-                        reason += f" | GREAT: Turns equal position into clearly winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
-                        return (Judgment.GREAT, reason)
-                    
-                    # Case 4: Maintains winning advantage in complex position
-                    if move_difficulty > 0.4 and \
-                       ((prev.color and prev.cp > 200 and curr.cp > 180) or \
-                        (not prev.color and prev.cp < -200 and curr.cp < -180)):
-                        reason += f" | GREAT: Maintains winning advantage in complex position (complexity={move_difficulty:.2f})"
-                        return (Judgment.GREAT, reason)
-                
-                # If none of the GREAT criteria are met, continue with normal evaluation
+                # Check for brilliant/great moves if we have board information
+                if prev_board and curr_board and move:
+                    # Check for brilliant move conditions
+                    is_brilliant, brilliant_reason = MoveAnalyzer._check_brilliant_conditions(
+                        prev, curr, prev_board, curr_board, move
+                    )
+                    if is_brilliant:
+                        return (Judgment.BRILLIANT, reason + brilliant_reason)
+                        
+                    # Check for great move conditions
+                    move_difficulty = MoveAnalyzer.move_complexity(prev_board, move)
+                    is_great, great_reason = MoveAnalyzer._check_great_conditions(
+                        prev, curr, prev_board, move, top_moves, move_difficulty
+                    )
+                    if is_great:
+                        return (Judgment.GREAT, reason + great_reason)
             else:
                 if move and top_moves:
                     reason += f" | NOT TOP MOVE: Played {move.uci()}, top was {top_moves[0]}"
             
-            # For forced moves, always return at least GOOD (we already checked for BRILLIANT/GREAT above)
+            # For forced moves that aren't brilliant or great, return GOOD
             if is_forced:
-                return (default_judgment, reason)
+                return (Judgment.GOOD, reason)
             
             # Handle mate scores
             if curr.mate is not None and prev.cp is not None:
@@ -355,22 +342,9 @@ class MoveAnalyzer:
                 return (Judgment.BLUNDER, reason)
                 
             # Handle missing cp values
-            if prev.cp is None and curr.cp is None:
-                logger.warning("Both evaluations missing cp values, defaulting to GOOD")
+            if prev.cp is None or curr.cp is None:
+                logger.warning("Missing evaluation cp value(s), defaulting to GOOD")
                 reason += " | GOOD: Missing evaluation data"
-                return (Judgment.GOOD, reason)
-            
-            # If only one evaluation is missing, we can sometimes still make a judgment
-            if prev.cp is None:
-                logger.warning("Previous evaluation missing cp value")
-                # We can't determine the change, so default to GOOD
-                reason += " | GOOD: Missing previous evaluation"
-                return (Judgment.GOOD, reason)
-                
-            if curr.cp is None:
-                logger.warning("Current evaluation missing cp value")
-                # We can't determine the change, so default to GOOD
-                reason += " | GOOD: Missing current evaluation"
                 return (Judgment.GOOD, reason)
                 
             # Calculate winning chances difference - Lichess style
@@ -395,20 +369,15 @@ class MoveAnalyzer:
                 reason += " | INACCURACY: Minor decrease in winning chances"
                 return (Judgment.INACCURACY, reason)
             
-            # For good moves (those that didn't decrease winning chances significantly)
-            # we might have special cases
-            if is_top_move:
-                # Check for BRILLIANT move (good piece sacrifice)
-                if prev_board and curr_board and move:
-                    if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
-                        reason += " | BRILLIANT: Good piece sacrifice"
-                        return (Judgment.BRILLIANT, reason)
+            # For good moves, check for special cases again
+            if is_top_move and prev_board and curr_board and move:
+                # Check for BRILLIANT move (good piece sacrifice) again
+                if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
+                    reason += " | BRILLIANT: Good piece sacrifice"
+                    return (Judgment.BRILLIANT, reason)
                 
-                # Check for GREAT move
-                is_only_good = False
-                move_difficulty = 0.0
-                
-                if prev_board and move and top_moves:
+                # Check for GREAT move again
+                if top_moves:
                     is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
                     move_difficulty = MoveAnalyzer.move_complexity(prev_board, move)
                     
@@ -426,15 +395,13 @@ class MoveAnalyzer:
             logger.error(f"Error in move analysis: {e}")
             return (Judgment.GOOD, f"Error during analysis: {e}")  # Default to GOOD on error
 
-
     @staticmethod
     def analyze_move(prev: Info, curr: Info, prev_board: chess.Board = None, 
                      curr_board: chess.Board = None, move: chess.Move = None) -> Judgment:
         """
-        Standard move analysis without top moves data
-        
-        This is kept for backward compatibility
+        Standard move analysis without top moves data (for backwards compatibility)
         """
-        return MoveAnalyzer.analyze_move_with_top_moves(
+        judgment, _ = MoveAnalyzer.analyze_move_with_top_moves(
             prev, curr, prev_board, curr_board, move, None
         )
+        return judgment

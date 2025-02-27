@@ -1,32 +1,36 @@
 # src/analysis/stockfish_handler.py
 import chess
 import chess.engine
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Union, Any
 from models.data_classes import Info
 import logging
-import asyncio
-import sys
+import os
 
 logger = logging.getLogger('chess_analyzer')
 
 class StockfishHandler:
-    def __init__(self, path: str = "stockfish", depth: int = 16):
+    def __init__(self, path: str = "stockfish", depth: int = 16, threads: int = 1, hash_size: int = 128):
         """
         Initialize the StockfishHandler with chess.engine library.
         
         Args:
             path: Path to the Stockfish executable
             depth: Search depth for analysis
+            threads: Number of CPU threads to use for analysis
+            hash_size: Hash table size in MB
         """
         try:
             self.engine = chess.engine.SimpleEngine.popen_uci(path)
             # Configure engine parameters - avoid setting managed options
             self.engine.configure({
-                "Threads": 1,
-                "Hash": 128
+                "Threads": threads,
+                "Hash": hash_size
             })
             self.depth = depth
-            # logger.info(f"Stockfish engine initialized successfully using path: {path}")
+            self.path = path
+        except FileNotFoundError:
+            logger.error(f"Stockfish engine not found at path: {path}")
+            raise FileNotFoundError(f"Stockfish engine not found at path: {path}")
         except Exception as e:
             logger.error(f"Failed to initialize Stockfish engine: {e}")
             raise
@@ -42,9 +46,11 @@ class StockfishHandler:
         Returns:
             List of best moves in UCI format
         """
+        if not board:
+            return []
+            
         try:
             # Using multipv parameter in analyse directly
-            # No need to configure MultiPV separately as it's managed by the library
             info = self.engine.analyse(
                 board, 
                 chess.engine.Limit(depth=self.depth),
@@ -72,7 +78,7 @@ class StockfishHandler:
             logger.error(f"Error getting best moves: {e}")
             return []
             
-    def _get_score_value(self, score):
+    def _get_score_value(self, score: Optional[chess.engine.Score]) -> int:
         """Helper to convert PovScore to a comparable value for sorting"""
         if score is None:
             return 0
@@ -85,9 +91,7 @@ class StockfishHandler:
                     return 10000 - mate_score  # Winning mate (closer mates are better)
                 else:
                     return -10000 - mate_score  # Losing mate (further mates are better)
-            else:
-                # Handle None mate score
-                return 0
+            return 0
         
         # Regular centipawn score - extract using white() to get a consistent perspective
         try:
@@ -95,6 +99,22 @@ class StockfishHandler:
         except Exception as e:
             logger.warning(f"Error getting score value: {e}")
             return 0
+
+    def _extract_evaluation_dict(self, score: chess.engine.Score) -> Dict[str, Any]:
+        """
+        Convert a chess.engine.Score object to an evaluation dictionary
+        
+        Args:
+            score: Chess engine score object
+            
+        Returns:
+            Dictionary with evaluation information
+        """
+        if score.is_mate():
+            return {"type": "mate", "value": score.mate()}
+        else:
+            # Convert score to centipawns from white's perspective
+            return {"type": "cp", "value": score.white().score()}
 
     def evaluate_position(self, board: chess.Board, ply: int) -> Info:
         """
@@ -104,8 +124,11 @@ class StockfishHandler:
             board: The board position to evaluate
             ply: The current ply number
         Returns:
-            Info object containing evaluation and best move variation
+            Info object containing evaluation and best move variations
         """
+        if not board:
+            return Info(ply=ply, eval={"type": "cp", "value": 0}, variation=[])
+            
         try:
             # Get analysis with multiple variations
             analysis = self.engine.analyse(
@@ -139,13 +162,7 @@ class StockfishHandler:
             eval_dict = {"type": "cp", "value": 0}  # Default value
             
             if primary_eval and "score" in primary_eval:
-                score = primary_eval["score"]
-                if score.is_mate():
-                    eval_dict = {"type": "mate", "value": score.mate()}
-                else:
-                    # Convert score to centipawns from white's perspective
-                    cp_score = score.white().score()
-                    eval_dict = {"type": "cp", "value": cp_score}
+                eval_dict = self._extract_evaluation_dict(primary_eval["score"])
             
             # Create Info object with evaluation and variations
             info = Info(
@@ -169,6 +186,5 @@ class StockfishHandler:
         try:
             if hasattr(self, 'engine'):
                 self.engine.quit()
-                # logger.info("Stockfish engine closed properly")
         except Exception as e:
             logger.error(f"Error closing Stockfish engine: {e}")
