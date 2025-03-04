@@ -110,11 +110,31 @@ class StockfishHandler:
         Returns:
             Dictionary with evaluation information
         """
-        if score.is_mate():
-            return {"type": "mate", "value": score.mate()}
-        else:
-            # Convert score to centipawns from white's perspective
-            return {"type": "cp", "value": score.white().score()}
+        try:
+            if score.is_mate():
+                # For mate scores, we need to extract it differently
+                mate_score = None
+                try:
+                    # Try to get the mate score directly
+                    mate_score = score.mate()
+                except AttributeError:
+                    # If that fails, try to get it from white's perspective
+                    try:
+                        mate_score = score.white().mate()
+                    except Exception as e:
+                        logger.warning(f"Error extracting mate score: {e}")
+                
+                if mate_score is not None:
+                    return {"type": "mate", "value": mate_score}
+                else:
+                    # Fallback to centipawn score if mate extraction fails
+                    return {"type": "cp", "value": 0}
+            else:
+                # Convert score to centipawns from white's perspective
+                return {"type": "cp", "value": score.white().score()}
+        except Exception as e:
+            logger.warning(f"Error extracting evaluation: {e}")
+            return {"type": "cp", "value": 0}
 
     def evaluate_position(self, board: chess.Board, ply: int) -> Info:
         """
@@ -159,6 +179,7 @@ class StockfishHandler:
             # Extract best move variations in UCI format
             variations = []
             primary_eval = None
+            multipv_data = []  # Store the multipv data
             
             if isinstance(analysis, list):
                 # Sort PV lines by score to ensure best moves first
@@ -171,11 +192,67 @@ class StockfishHandler:
                     for pv_info in sorted_pvs:
                         if "pv" in pv_info and pv_info["pv"]:
                             variations.append(pv_info["pv"][0].uci())
+                            
+                            # Store the multipv data
+                            score_info = {}
+                            if "score" in pv_info:
+                                score = pv_info["score"]
+                                if score.is_mate():
+                                    # For mate scores, we need to extract it differently
+                                    mate_score = None
+                                    try:
+                                        # Try to get the mate score directly
+                                        mate_score = score.mate()
+                                    except AttributeError:
+                                        # If that fails, try to get it from white's perspective
+                                        try:
+                                            mate_score = score.white().mate()
+                                        except Exception as e:
+                                            logger.warning(f"Error extracting mate score: {e}")
+                                    
+                                    if mate_score is not None:
+                                        score_info["mate"] = mate_score
+                                else:
+                                    # Use white().score() to get the centipawn value
+                                    score_info["cp"] = score.white().score()
+                            
+                            multipv_data.append({
+                                "move": pv_info["pv"][0].uci(),
+                                "score": score_info
+                            })
             else:
                 # Handle single info dict
                 primary_eval = analysis
                 if "pv" in analysis and analysis["pv"]:
                     variations.append(analysis["pv"][0].uci())
+                    
+                    # Store the multipv data for single PV
+                    score_info = {}
+                    if "score" in analysis:
+                        score = analysis["score"]
+                        if score.is_mate():
+                            # For mate scores, we need to extract it differently
+                            mate_score = None
+                            try:
+                                # Try to get the mate score directly
+                                mate_score = score.mate()
+                            except AttributeError:
+                                # If that fails, try to get it from white's perspective
+                                try:
+                                    mate_score = score.white().mate()
+                                except Exception as e:
+                                    logger.warning(f"Error extracting mate score: {e}")
+                            
+                            if mate_score is not None:
+                                score_info["mate"] = mate_score
+                        else:
+                            # Use white().score() to get the centipawn value
+                            score_info["cp"] = score.white().score()
+                    
+                    multipv_data.append({
+                        "move": analysis["pv"][0].uci(),
+                        "score": score_info
+                    })
             
             # Prepare evaluation dictionary
             eval_dict = {"type": "cp", "value": 0}  # Default value
@@ -199,7 +276,8 @@ class StockfishHandler:
                 ply=ply,
                 eval=eval_dict,
                 variation=variations,
-                wdl=wdl_dict
+                wdl=wdl_dict,
+                multipv=multipv_data  # Add the multipv data
             )
             
             return info
@@ -210,7 +288,8 @@ class StockfishHandler:
                 ply=ply,
                 eval={"type": "cp", "value": 0},
                 variation=[],
-                wdl=None
+                wdl=None,
+                multipv=[]  # Add empty multipv data
             )
 
     def close(self):

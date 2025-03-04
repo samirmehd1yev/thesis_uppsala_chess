@@ -57,13 +57,22 @@ class MoveAnalyzer:
             captured_value = MoveAnalyzer.PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
             
             # If piece moved to an empty square or captured a significantly lower value piece, check if it's now under attack
-            if captured is None or captured_value < piece_value - 0.5:  # Using a 0.5 threshold to account for knight/bishop equal value
+            if captured is None or captured_value < piece_value:
                 # Is the piece now under attack?
                 attackers = curr_board.attackers(not prev_board.turn, move.to_square)
                 if attackers:
+                    # check if legal attackers
+                    legal_attackers = []
+                    for attacker_square in attackers:
+                        attack_move = chess.Move(attacker_square, move.to_square)
+                        if curr_board.is_legal(attack_move):
+                            legal_attackers.append(attack_move)
+                    if not legal_attackers:
+                        return False
+                    
                     # Is there adequate defense?
                     defenders = curr_board.attackers(prev_board.turn, move.to_square)
-                    if not defenders or len(attackers) > len(defenders):
+                    if not defenders or len(legal_attackers) > len(defenders):
                         return True
             
             return False
@@ -86,76 +95,57 @@ class MoveAnalyzer:
             # Check if played move is in top moves and is the best move
             if move_uci != top_moves[0]:
                 return False
-                
-            # If we have evaluation data, check for significant eval drop
-            if prev_eval and hasattr(prev_eval, 'multipv'):
-                print('came here')
-                multipv_evals = prev_eval.multipv
-                if len(multipv_evals) >= 2:
-                    best_eval = multipv_evals[0].get('score', {}).get('cp', 0)
-                    second_eval = multipv_evals[1].get('score', {}).get('cp', 0)
-                    
-                    # If best move leads to mate and second doesn't, it's the only good move
-                    if multipv_evals[0].get('score', {}).get('mate') is not None and \
-                       multipv_evals[1].get('score', {}).get('mate') is None:
-                        return True
-                    
-                    # If both moves lead to mate, check if there's a significant difference
-                    if multipv_evals[0].get('score', {}).get('mate') is not None and \
-                       multipv_evals[1].get('score', {}).get('mate') is not None:
-                        mate1 = multipv_evals[0]['score']['mate']
-                        mate2 = multipv_evals[1]['score']['mate']
-                        # If first move mates significantly faster
-                        if mate1 > 0 and (mate2 < 0 or mate1 < mate2 - 2):
-                            return True
-                        return False
-                    
-                    # Check for significant centipawn difference (more than 1 pawn)
-                    if abs(best_eval - second_eval) > 100:
-                        return True
-                    
-                    return False
             
-            # If we don't have eval data, use move legality and basic position assessment
-            if len(top_moves) >= 2:
-                # Get board after making the top move
-                top_move_board = prev_board.copy()
-                try:
-                    top_move_board.push(chess.Move.from_uci(top_moves[0]))
-                except ValueError:
-                    return False  # Invalid move format
+            # If we have evaluation data, check for significant eval drop
+            if prev_eval and hasattr(prev_eval, 'multipv') and prev_eval.multipv and len(prev_eval.multipv) >= 2:
+                # Get evaluations for the best and second-best moves
+                best_move_data = prev_eval.multipv[0]
+                second_move_data = prev_eval.multipv[1]
                 
-                # Count legal moves after best move
-                top_move_legal_moves = list(top_move_board.legal_moves)
-                
-                # Get board after making the second best move
-                second_move_board = prev_board.copy()
-                try:
-                    second_move = chess.Move.from_uci(top_moves[1])
-                    second_move_board.push(second_move)
-                    
-                    # Count legal moves after second best move
-                    second_move_legal_moves = list(second_move_board.legal_moves)
-                    
-                    # If there's a big difference in available moves or position characteristics,
-                    # the first move might be the only good one
-                    if len(top_move_legal_moves) > len(second_move_legal_moves) * 2:
-                        return True
-                        
-                    # Check if second move leads to immediate tactical problems
-                    if second_move_board.is_check() or \
-                       second_move_board.is_checkmate() or \
-                       second_move_board.is_stalemate():
-                        return True
-                        
-                except Exception:
-                    # If second move is invalid, the top move is definitely the only good one
+                # If best move leads to mate and second doesn't, it's the only good move
+                if 'mate' in best_move_data['score'] and 'cp' in second_move_data['score']:
                     return True
+                
+                # If second move leads to mate against us, first move is the only good one
+                if 'cp' in best_move_data['score'] and 'mate' in second_move_data['score']:
+                    if second_move_data['score']['mate'] < 0:
+                        return True
+                
+                # Check for significant centipawn difference (more than 1 pawn)
+                if 'cp' in best_move_data['score'] and 'cp' in second_move_data['score']:
+                    best_eval = best_move_data['score']['cp']
+                    second_eval = second_move_data['score']['cp']
+                    
+                    # If the difference is more than 1.5 pawns, it's the only good move
+                    if abs(best_eval - second_eval) > 150:
+                        return True
+                    
+                    # If position is critical (close to 0), even a smaller difference matters
+                    if abs(best_eval) < 100 and abs(best_eval - second_eval) > 80:
+                        return True
+                
+            # Check if it's a forced move to avoid mate
+            if len(list(prev_board.legal_moves)) > 1:  # Not the only legal move
+                # Make a copy of the board to test other moves
+                for alt_move in prev_board.legal_moves:
+                    if alt_move == move:
+                        continue
+                    
+                    # Skip if this move is in top 2 engine moves (already evaluated above)
+                    if len(top_moves) >= 2 and alt_move.uci() in top_moves[:2]:
+                        continue
+                        
+                    # Try the alternative move
+                    test_board = prev_board.copy()
+                    test_board.push(alt_move)
+                    
+                    # If this leads to a forced mate, then the original move might be the only good one
+                    if test_board.is_checkmate():
+                        return True
             
             return False
-            
         except Exception as e:
-            logger.warning(f"Error checking if move is the only good move: {e}")
+            logger.warning(f"Error in is_only_good_move: {e}")
             return False
 
     @staticmethod
@@ -172,38 +162,104 @@ class MoveAnalyzer:
         try:
             complexity = 0.0
             
-            # Factor 1: Is it a capture move?
-            if prev_board.is_capture(move):
-                complexity += 0.1
-                
-            # Factor 2: Is it a check?
+            # Create the resulting board after the move
             after_board = prev_board.copy()
             after_board.push(move)
-            if after_board.is_check():
-                complexity += 0.2
+            
+            # Factor 1: Tactical factors
+            
+            # 1.1: Is it a sacrifice? (sacrifices are complex)
+            if MoveAnalyzer.is_piece_sacrifice(prev_board, after_board, move):
+                complexity += 0.4
                 
-            # Factor 3: Piece value (more valuable pieces are usually moved with more care)
-            piece = prev_board.piece_at(move.from_square)
-            if piece:
-                if piece.piece_type == chess.QUEEN:
+            # 1.2: Captures (with evaluation)
+            captured_piece = prev_board.piece_at(move.to_square)
+            moving_piece = prev_board.piece_at(move.from_square)
+            if captured_piece:
+                # If capturing with a less valuable piece (or equal), it's usually obvious
+                if moving_piece and MoveAnalyzer.PIECE_VALUES[moving_piece.piece_type] <= MoveAnalyzer.PIECE_VALUES[captured_piece.piece_type]:
+                    complexity -= 0.15
+                # If the captured piece is hanging (undefended), it's obvious
+                if not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
+                    complexity -= 0.25
+                # If capturing with a more valuable piece, might be complex
+                elif moving_piece and MoveAnalyzer.PIECE_VALUES[moving_piece.piece_type] > MoveAnalyzer.PIECE_VALUES[captured_piece.piece_type]:
+                    complexity += 0.1
+            
+            # 1.3: Checks (checks can be simple, but some are complex)
+            if after_board.is_check():
+                # Discovered checks are complex
+                if prev_board.is_attacked_by(prev_board.turn, move.to_square) and not move.from_square == move.to_square:
                     complexity += 0.3
-                elif piece.piece_type in [chess.ROOK, chess.BISHOP, chess.KNIGHT]:
+                else:
+                    # Direct checks are generally more obvious
+                    complexity -= 0.1
+            
+            # Factor 2: Piece-specific considerations
+            
+            # 2.1: Knight moves are generally less intuitive
+            if moving_piece and moving_piece.piece_type == chess.KNIGHT:
+                complexity += 0.15
+                
+            # 2.2: Queen, rook and bishop long-range moves can be complex
+            if moving_piece:
+                distance = chess.square_distance(move.from_square, move.to_square)
+                if moving_piece.piece_type in [chess.QUEEN, chess.ROOK, chess.BISHOP] and distance > 3:
                     complexity += 0.2
                     
-            # Factor 4: Is it a non-obvious move? (not to the edge, not to the center)
+            # 2.3: Pawn moves
+            if moving_piece and moving_piece.piece_type == chess.PAWN:
+                # Pawn promotions are usually obvious
+                if chess.square_rank(move.to_square) in [0, 7]:
+                    complexity -= 0.2
+                # Quiet pawn moves in the middlegame can be strategic and complex
+                elif not captured_piece and 2 <= chess.square_rank(move.to_square) <= 5:
+                    complexity += 0.1
+            
+            # Factor 3: Strategic factors
+            
+            # 3.1: Moving to squares under attack is complex (unless capturing)
+            if after_board.is_attacked_by(not prev_board.turn, move.to_square) and not captured_piece:
+                complexity += 0.25
+                
+            # 3.2: Moving away from attacked squares is more obvious
+            if prev_board.is_attacked_by(not prev_board.turn, move.from_square):
+                complexity -= 0.2
+                
+            # 3.3: Moving to outposts or strategic squares
             destination_rank = chess.square_rank(move.to_square)
             destination_file = chess.square_file(move.to_square)
-            if 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
-                pass  # Center squares, no complexity added
+            
+            # Center control is more obvious in early game
+            if len(prev_board.move_stack) < 20 and 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
+                complexity -= 0.1
+            # Edge maneuvers can be complex
             elif destination_rank in [0, 7] or destination_file in [0, 7]:
-                complexity += 0.1  # Edge squares
-            else:
-                complexity += 0.15  # In-between
-                
-            # Factor 5: Is the piece already under attack?
-            if prev_board.is_attacked_by(not prev_board.turn, move.from_square):
-                complexity -= 0.2  # Reduce complexity as it's more obvious to move threatened pieces
-                
+                complexity += 0.1
+            
+            # 3.4: King safety
+            if moving_piece and moving_piece.piece_type == chess.KING:
+                # King moves in the middlegame are often complex (except castling)
+                if not prev_board.is_castling(move) and 8 < len(prev_board.move_stack) < 40:
+                    complexity += 0.3
+                # Castling is generally obvious
+                elif prev_board.is_castling(move):
+                    complexity -= 0.2
+            
+            # Factor 4: Tempo and development
+            
+            # 4.1: Development moves in the opening are obvious
+            if len(prev_board.move_stack) < 15:
+                if (moving_piece and moving_piece.piece_type in [chess.KNIGHT, chess.BISHOP] and 
+                    chess.square_rank(move.from_square) in [0, 1, 6, 7] and
+                    chess.square_rank(move.to_square) not in [0, 1, 6, 7]):
+                    complexity -= 0.2
+            
+            # 4.2: Non-developing moves in the opening can be complex
+            if len(prev_board.move_stack) < 10:
+                if moving_piece and moving_piece.piece_type in [chess.QUEEN, chess.ROOK]:
+                    complexity += 0.15
+            
             # Ensure complexity is within bounds
             return max(0.0, min(1.0, complexity))
         except Exception as e:
@@ -249,8 +305,16 @@ class MoveAnalyzer:
             
         is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
         
+        # Check if this is a simple capture
+        is_simple_capture = False
+        if prev_board:
+            captured_piece = prev_board.piece_at(move.to_square)
+            if captured_piece and not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
+                # If capturing an undefended piece, it's a simple capture
+                is_simple_capture = True
+        
         # Case 1: Difficult and only good move
-        if move_difficulty > 0.3 and is_only_good:
+        if move_difficulty > 0.3 and is_only_good and not is_simple_capture:
             return True, f" | GREAT: Only good move in a complex position (complexity={move_difficulty:.2f})"
         
         # Case 2: Turns losing into equal/winning
@@ -264,7 +328,7 @@ class MoveAnalyzer:
             return True, f" | GREAT: Turns equal position into clearly winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
         
         # Case 4: Maintains winning advantage in complex position
-        if move_difficulty > 0.4 and \
+        if move_difficulty > 0.4 and not is_simple_capture and \
            ((prev.color and prev.cp > 200 and curr.cp > 180) or \
             (not prev.color and prev.cp < -200 and curr.cp < -180)):
             return True, f" | GREAT: Maintains winning advantage in complex position (complexity={move_difficulty:.2f})"
@@ -302,6 +366,16 @@ class MoveAnalyzer:
                 is_forced = len(legal_moves) == 1
                 if is_forced:
                     reason = "FORCED MOVE: Only one legal move available"
+                    return (Judgment.GOOD, reason)
+            
+            # Check if this is a simple capture of an undefended piece
+            is_simple_capture = False
+            if prev_board and move:
+                captured_piece = prev_board.piece_at(move.to_square)
+                if captured_piece and not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
+                    # If capturing an undefended piece, it's a simple capture
+                    is_simple_capture = True
+                    reason += " | SIMPLE CAPTURE: Taking an undefended piece"
             
             # Check if move is in top engine moves
             is_top_move = False
@@ -318,13 +392,14 @@ class MoveAnalyzer:
                     if is_brilliant:
                         return (Judgment.BRILLIANT, reason + brilliant_reason)
                         
-                    # Check for great move conditions
-                    move_difficulty = MoveAnalyzer.move_complexity(prev_board, move)
-                    is_great, great_reason = MoveAnalyzer._check_great_conditions(
-                        prev, curr, prev_board, move, top_moves, move_difficulty
-                    )
-                    if is_great:
-                        return (Judgment.GREAT, reason + great_reason)
+                    # Check for great move conditions - but not for simple captures
+                    if not is_simple_capture:
+                        move_difficulty = MoveAnalyzer.move_complexity(prev_board, move)
+                        is_great, great_reason = MoveAnalyzer._check_great_conditions(
+                            prev, curr, prev_board, move, top_moves, move_difficulty
+                        )
+                        if is_great:
+                            return (Judgment.GREAT, reason + great_reason)
             else:
                 if move and top_moves:
                     reason += f" | NOT TOP MOVE: Played {move.uci()}, top was {top_moves[0]}"
@@ -365,6 +440,9 @@ class MoveAnalyzer:
             
             # Original Lichess-style classification
             if delta <= -0.3:
+                # if top move skip blunder
+                if is_top_move:
+                    return (Judgment.GOOD, reason)
                 reason += " | BLUNDER: Major decrease in winning chances"
                 return (Judgment.BLUNDER, reason)
             elif delta <= -0.2:
@@ -381,8 +459,8 @@ class MoveAnalyzer:
                     reason += " | BRILLIANT: Good piece sacrifice"
                     return (Judgment.BRILLIANT, reason)
                 
-                # Check for GREAT move again
-                if top_moves:
+                # Check for GREAT move again - but not for simple captures
+                if top_moves and not is_simple_capture:
                     is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
                     move_difficulty = MoveAnalyzer.move_complexity(prev_board, move)
                     

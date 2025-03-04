@@ -12,11 +12,13 @@ class Info:
         eval (dict): The evaluation dictionary from Stockfish
         variation (List[Dict], optional): The list of best moves with their evaluations
         wdl (Optional[Dict]): Win-Draw-Loss probabilities (if available)
+        multipv (Optional[List[Dict]]): Multiple principal variations with scores
     """
     ply: int
     eval: dict  # Stockfish evaluation
     variation: List[str] = None
     wdl: Optional[Dict[str, float]] = None
+    multipv: Optional[List[Dict]] = None
 
     @property
     def color(self) -> bool:
