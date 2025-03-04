@@ -136,6 +136,25 @@ class StockfishHandler:
                 chess.engine.Limit(depth=self.depth),
                 multipv=3
             )
+            # print(analysis)
+            # print('\n\n\n\n')
+            # wdl = list(chess.engine.PovWdl.white(analysis['wdl']))
+            # print(wdl)
+            wdl_model = "sf"  # Use Stockfish's WDL model
+            wdl = None
+            
+            # Extract WDL (Win/Draw/Loss) probabilities if possible
+            if isinstance(analysis, list) and analysis and "score" in analysis[0]:
+                # Get WDL from the best move's score
+                score = analysis[0]["score"]
+                if hasattr(score, "wdl"):
+                    # Get WDL with default parameters (using Stockfish model at ply=30)
+                    wdl = score.wdl(model=wdl_model, ply=ply)
+                    
+                    # print(f"Ply: {ply}")
+                    
+                    # print(f"Debug: WDL: {wdl}\n\n\n\n")
+                    # print(f"Debug: WDL: {wdl}\n\n\n\n")
             
             # Extract best move variations in UCI format
             variations = []
@@ -164,11 +183,23 @@ class StockfishHandler:
             if primary_eval and "score" in primary_eval:
                 eval_dict = self._extract_evaluation_dict(primary_eval["score"])
             
+            # Prepare WDL dictionary if available
+            wdl_dict = None
+            if wdl:
+                # The WDL values from Stockfish are in permille (0-1000)
+                # Convert to 0-1 range for better handling in sharpness calculation
+                wdl_dict = {
+                    "wins": wdl[0] / 1000.0 ,
+                    "draws": wdl[1] / 1000.0,
+                    "losses": wdl[2] / 1000.0
+                }
+            
             # Create Info object with evaluation and variations
             info = Info(
                 ply=ply,
                 eval=eval_dict,
-                variation=variations
+                variation=variations,
+                wdl=wdl_dict
             )
             
             return info
@@ -178,7 +209,8 @@ class StockfishHandler:
             return Info(
                 ply=ply,
                 eval={"type": "cp", "value": 0},
-                variation=[]
+                variation=[],
+                wdl=None
             )
 
     def close(self):

@@ -11,10 +11,12 @@ class Info:
         ply (int): The ply number (half-move count) in the game
         eval (dict): The evaluation dictionary from Stockfish
         variation (List[Dict], optional): The list of best moves with their evaluations
+        wdl (Optional[Dict]): Win-Draw-Loss probabilities (if available)
     """
     ply: int
     eval: dict  # Stockfish evaluation
     variation: List[str] = None
+    wdl: Optional[Dict[str, float]] = None
 
     @property
     def color(self) -> bool:
@@ -98,3 +100,5 @@ class FeatureVector:
     
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)
+    
+    #cumulate

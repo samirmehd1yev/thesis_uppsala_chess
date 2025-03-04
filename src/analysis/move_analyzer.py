@@ -52,8 +52,12 @@ class MoveAnalyzer:
             # Check if a capture happened at the destination
             captured = prev_board.piece_at(move.to_square)
             
-            # If piece moved to an empty square or captured a lower value piece, check if it's now under attack
-            if captured is None or captured.piece_type < piece.piece_type:
+            # Get actual piece values to compare
+            piece_value = MoveAnalyzer.PIECE_VALUES.get(piece.piece_type, 0)
+            captured_value = MoveAnalyzer.PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
+            
+            # If piece moved to an empty square or captured a significantly lower value piece, check if it's now under attack
+            if captured is None or captured_value < piece_value - 0.5:  # Using a 0.5 threshold to account for knight/bishop equal value
                 # Is the piece now under attack?
                 attackers = curr_board.attackers(not prev_board.turn, move.to_square)
                 if attackers:
@@ -85,6 +89,7 @@ class MoveAnalyzer:
                 
             # If we have evaluation data, check for significant eval drop
             if prev_eval and hasattr(prev_eval, 'multipv'):
+                print('came here')
                 multipv_evals = prev_eval.multipv
                 if len(multipv_evals) >= 2:
                     best_eval = multipv_evals[0].get('score', {}).get('cp', 0)

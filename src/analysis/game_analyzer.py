@@ -15,6 +15,7 @@ from analysis.stockfish_handler import StockfishHandler
 from analysis.move_analyzer import MoveAnalyzer
 from models.data_classes import Info
 from models.enums import Judgment
+from analysis.sharpness_analyzer import WdlSharpnessAnalyzer
 
 logger = logging.getLogger('chess_analyzer')
 
@@ -47,7 +48,33 @@ class GameAnalyzer:
             self.num_cpus = max(1, min(num_cpus, multiprocessing.cpu_count()))
             
         self.feature_extractor = FeatureExtractor()
+        
+        # Add sharpness analyzer
+        self.sharpness_analyzer = WdlSharpnessAnalyzer()
     
+    def calculate_position_sharpness(self, positions: List[chess.Board], evals: List[Info]) -> List[Dict[str, float]]:
+        """
+        Calculate sharpness scores for all positions in the game.
+        
+        Args:
+            positions: List of chess board positions
+            evals: List of evaluation info objects
+        
+        Returns:
+            List of dictionaries with sharpness scores for each position
+        """
+        sharpness_scores = []
+        
+        for i, (board, eval_info) in enumerate(zip(positions, evals)):
+            if board and eval_info:
+                sharpness = self.sharpness_analyzer.calculate_position_sharpness(board, eval_info)
+                sharpness_scores.append(sharpness)
+            else:
+                # Default values for missing positions/evaluations
+                sharpness_scores.append({'sharpness': 0.0, 'white_sharpness': 0.0, 'black_sharpness': 0.0})
+                
+        return sharpness_scores
+        
     def analyze_pgn(self, pgn_content: str) -> Dict[str, Any]:
         """
         Analyze a game from PGN string.
@@ -62,6 +89,8 @@ class GameAnalyzer:
             - judgments: List of move judgments
             - features: FeatureVector with extracted features
             - top_moves: List of top moves for each position
+            - sharpness: List of sharpness scores for each position
+            - cumulative_sharpness: Cumulative sharpness scores for the game
         """
         logger.info("Starting game analysis...")
         start_time = time.time()
@@ -99,6 +128,14 @@ class GameAnalyzer:
             # Collect top moves for each position
             top_moves = [eval_info.variation for eval_info in evals if eval_info and hasattr(eval_info, 'variation')]
             
+            # Calculate position sharpness
+            logger.info("Calculating position sharpness...")
+            sharpness_scores = self.calculate_position_sharpness(positions, evals)
+            cumulative_sharpness = self.sharpness_analyzer.calculate_cumulative_sharpness(sharpness_scores)
+            print(f"Debug: Overall cumulative sharpness: {cumulative_sharpness['sharpness']:.2f}")
+            print(f"Debug: White's cumulative sharpness: {cumulative_sharpness['white_sharpness']:.2f} (positions where White is to move)")
+            print(f"Debug: Black's cumulative sharpness: {cumulative_sharpness['black_sharpness']:.2f} (positions where Black is to move)")
+            
             logger.info(f"Total analysis completed in {time.time() - start_time:.2f} seconds")
             
             return {
@@ -106,7 +143,9 @@ class GameAnalyzer:
                 "evals": evals,
                 "judgments": judgments,
                 "features": features,
-                "top_moves": top_moves
+                "top_moves": top_moves,
+                "sharpness": sharpness_scores,
+                "cumulative_sharpness": cumulative_sharpness
             }
             
         except Exception as e:
@@ -177,6 +216,7 @@ class GameAnalyzer:
         try:
             # Evaluate the position
             result = stockfish.evaluate_position(position, ply)
+            # print(f"Debug: Result: {result}")
             
             # Store result in shared dictionary
             result_dict[ply] = result
