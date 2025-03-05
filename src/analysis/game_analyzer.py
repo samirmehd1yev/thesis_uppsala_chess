@@ -142,7 +142,7 @@ class GameAnalyzer:
             
             # Calculate move accuracies
             logger.info("Calculating move accuracies...")
-            move_accuracies = self._calculate_move_accuracies(positions, evals)
+            move_accuracies = self._calculate_move_accuracies(positions, evals, mainline_moves)
             
             # Calculate overall player accuracies
             white_accuracy, black_accuracy = self._calculate_player_accuracies(move_accuracies, positions)
@@ -167,7 +167,7 @@ class GameAnalyzer:
                 "white_accuracy": white_accuracy,
                 "black_accuracy": black_accuracy
             }
-            
+        
         except Exception as e:
             logger.error(f"Error during analysis: {e}")
             import traceback
@@ -327,13 +327,14 @@ class GameAnalyzer:
             logger.error(f"Error analyzing move: {e}")
             return Judgment.GOOD  # Default to GOOD on error
     
-    def _calculate_move_accuracies(self, positions: List[chess.Board], evals: List[Info]) -> List[Dict[str, float]]:
+    def _calculate_move_accuracies(self, positions: List[chess.Board], evals: List[Info], mainline_moves: List[chess.Move]) -> List[Dict[str, float]]:
         """
         Calculate accuracy for each move based on the change in winning percentages.
         
         Args:
             positions: List of chess board positions
             evals: List of evaluation information for each position
+            mainline_moves: List of moves played in the game
             
         Returns:
             List of dictionaries containing move accuracy information
@@ -341,10 +342,14 @@ class GameAnalyzer:
         move_accuracies = []
         
         # We need at least 2 positions to calculate accuracy for 1 move
-        if len(positions) < 2 or len(evals) < 2:
+        if len(positions) < 2 or len(evals) < 2 or not mainline_moves:
             return move_accuracies
             
         for i in range(len(positions) - 1):  # We calculate accuracy for each move except the last position
+            # Skip if we don't have the move for this position
+            if i >= len(mainline_moves):
+                continue
+                
             # Determine whose move it was
             player_color = "white" if positions[i].turn == chess.WHITE else "black"
             
@@ -371,8 +376,18 @@ class GameAnalyzer:
             win_percent_before = MoveAnalyzer.pov_chances(player_color, score_dict_before)
             win_percent_after = MoveAnalyzer.pov_chances(player_color, score_dict_after)
             
+            # Check if the move was a top engine move
+            is_top_move = False
+            if hasattr(eval_before, 'variation') and eval_before.variation:
+                # Get the actual move played
+                actual_move = mainline_moves[i]
+                
+                # Check if the move played matches the top engine move
+                top_engine_move = eval_before.variation[0] if eval_before.variation else None
+                is_top_move = actual_move.uci() == top_engine_move
+            
             # Calculate accuracy for this move
-            accuracy = MoveAnalyzer.calculate_move_accuracy(win_percent_before, win_percent_after)
+            accuracy = MoveAnalyzer.calculate_move_accuracy(win_percent_before, win_percent_after, is_top_move)
             
             move_accuracies.append({
                 "move_number": (i // 2) + 1 if i % 2 == 0 else i // 2 + 1,  # Chess move numbering
@@ -380,6 +395,7 @@ class GameAnalyzer:
                 "accuracy": accuracy,
                 "win_percent_before": win_percent_before * 100,  # Convert to percentage
                 "win_percent_after": win_percent_after * 100,    # Convert to percentage
+                "is_top_move": is_top_move,  # Add this information to the output
             })
             
         return move_accuracies

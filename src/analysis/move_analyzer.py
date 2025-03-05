@@ -621,7 +621,7 @@ class MoveAnalyzer:
         return judgment
 
     @staticmethod
-    def calculate_move_accuracy(win_percent_before: float, win_percent_after: float) -> float:
+    def calculate_move_accuracy(win_percent_before: float, win_percent_after: float, is_top_move: bool = False) -> float:
         """
         Calculate move accuracy percentage based on the difference in winning chances.
         
@@ -630,6 +630,7 @@ class MoveAnalyzer:
         Args:
             win_percent_before: Winning percentage before the move (0.0 to 1.0)
             win_percent_after: Winning percentage after the move (0.0 to 1.0)
+            is_top_move: Whether the played move is the engine's top choice
             
         Returns:
             Accuracy percentage (0 to 100)
@@ -637,6 +638,10 @@ class MoveAnalyzer:
         try:
             # Handle None values
             if win_percent_before is None or win_percent_after is None:
+                return 100.0
+            
+            # If it's the top move, return 100% accuracy directly
+            if is_top_move:
                 return 100.0
             
             # If the position improved or stayed the same, return 100%
