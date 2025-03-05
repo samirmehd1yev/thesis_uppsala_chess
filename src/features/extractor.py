@@ -1,4 +1,3 @@
-# src/features/extractor.py
 import chess
 import chess.pgn
 from typing import Dict, List, Optional, Tuple
@@ -7,10 +6,12 @@ from models.data_classes import FeatureVector, Info
 from models.enums import Judgment
 from analysis.phase_detector import GamePhaseDetector
 from analysis.move_analyzer import MoveAnalyzer
+from analysis.king_safety import KingSafetyEvaluator
 
 class FeatureExtractor:
     def __init__(self):
         self.phase_detector = GamePhaseDetector()
+        self.king_safety_evaluator = KingSafetyEvaluator()
         
     def extract_features(self, game: chess.pgn.Game, evals: Optional[List[Info]] = None, judgments: Optional[List[Judgment]] = None) -> FeatureVector:
         """
@@ -49,6 +50,15 @@ class FeatureExtractor:
         features.pawn_structure_changes = self._calculate_pawn_changes(positions)
         features.center_control_avg = self._calculate_center_control(positions)
         
+        # King safety features - new addition
+        king_safety_metrics = self._calculate_king_safety(positions)
+        features.white_king_safety = king_safety_metrics['white']['avg_safety'] 
+        features.black_king_safety = king_safety_metrics['black']['avg_safety']
+        features.white_king_safety_min = king_safety_metrics['white']['min_safety']
+        features.black_king_safety_min = king_safety_metrics['black']['min_safety']
+        features.white_vulnerability_spikes = king_safety_metrics['white']['vulnerability_spikes']
+        features.black_vulnerability_spikes = king_safety_metrics['black']['vulnerability_spikes']
+        
         # Calculate quality metrics if evaluations available
         if evals and len(evals) > 1:
             # Get the actual moves played
@@ -65,6 +75,105 @@ class FeatureExtractor:
                 self._calculate_quality_metrics(evals, features, positions, moves)
         
         return features
+    
+    def _calculate_king_safety(self, positions: List[chess.Board]) -> Dict[str, Dict[str, float]]:
+        """
+        Calculate king safety metrics for both players throughout the game.
+        
+        Args:
+            positions: List of board positions
+            
+        Returns:
+            Dictionary with king safety metrics for both players
+        """
+        if not positions:
+            return {
+                "white": {
+                    "avg_safety": 0,
+                    "min_safety": 0,
+                    "safety_drop": 0,
+                    "vulnerability_spikes": 0
+                },
+                "black": {
+                    "avg_safety": 0,
+                    "min_safety": 0,
+                    "safety_drop": 0,
+                    "vulnerability_spikes": 0
+                }
+            }
+        
+        # Track safety scores for both colors
+        white_scores = []
+        black_scores = []
+        
+        # Skip first few positions to avoid early game anomalies
+        start_idx = min(10, len(positions) // 4)
+        
+        # Evaluate king safety for each position
+        for position in positions[start_idx:]:
+            # Skip invalid positions
+            if position.king(chess.WHITE) is None or position.king(chess.BLACK) is None:
+                continue
+                
+            # Get safety scores for both sides
+            white_safety = self.king_safety_evaluator.evaluate_king_safety(position, chess.WHITE)
+            black_safety = self.king_safety_evaluator.evaluate_king_safety(position, chess.BLACK)
+            
+            white_scores.append(white_safety)
+            black_scores.append(black_safety)
+        
+        # Calculate derived metrics
+        white_features = self._calculate_safety_metrics(white_scores)
+        black_features = self._calculate_safety_metrics(black_scores)
+        
+        return {
+            "white": white_features,
+            "black": black_features
+        }
+    
+    def _calculate_safety_metrics(self, safety_scores: List[int]) -> Dict[str, float]:
+        """
+        Calculate derived metrics from raw safety scores.
+        
+        Args:
+            safety_scores: List of safety scores for a player
+            
+        Returns:
+            Dictionary of derived metrics
+        """
+        if not safety_scores:
+            return {
+                "avg_safety": 0,
+                "min_safety": 0,
+                "safety_drop": 0,
+                "vulnerability_spikes": 0
+            }
+        
+        # Average safety score
+        avg_safety = sum(safety_scores) / len(safety_scores)
+        
+        # Minimum safety score
+        min_safety = min(safety_scores)
+        
+        # Calculate maximum safety drop between consecutive positions
+        max_drop = 0
+        for i in range(1, len(safety_scores)):
+            drop = safety_scores[i-1] - safety_scores[i]
+            max_drop = max(max_drop, drop)
+        
+        # Count vulnerability spikes (sudden drops in safety)
+        threshold = min(100, abs(avg_safety * 0.3))  # 30% of average as threshold
+        vulnerability_spikes = 0
+        for i in range(1, len(safety_scores)):
+            if safety_scores[i-1] - safety_scores[i] > threshold:
+                vulnerability_spikes += 1
+        
+        return {
+            "avg_safety": avg_safety,
+            "min_safety": min_safety,
+            "safety_drop": max_drop,
+            "vulnerability_spikes": vulnerability_spikes
+        }
     
     def _phase_length(self, mg_start: int, eg_start: int, total_moves: int) -> Tuple[float, float, float]:
         """

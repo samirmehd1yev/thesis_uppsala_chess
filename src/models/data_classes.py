@@ -1,4 +1,3 @@
-# src/models/data_classes.py
 from dataclasses import dataclass
 from typing import List, Optional, Dict
 import numpy as np
@@ -102,7 +101,13 @@ class FeatureVector:
     # Statistical Features
     center_control_avg: float = 0.0
     
+    # King Safety Features - New
+    white_king_safety: float = 0.0      # Average king safety for White
+    black_king_safety: float = 0.0      # Average king safety for Black
+    white_king_safety_min: float = 0.0  # Minimum king safety for White
+    black_king_safety_min: float = 0.0  # Minimum king safety for Black
+    white_vulnerability_spikes: float = 0.0  # Number of sudden safety drops for White
+    black_vulnerability_spikes: float = 0.0  # Number of sudden safety drops for Black
+    
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)
-    
-    #cumulate

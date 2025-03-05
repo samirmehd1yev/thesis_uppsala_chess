@@ -86,6 +86,57 @@ def calculate_eval_change(prev_eval, curr_eval, is_white_move):
     # Default to a small change
     return 0.0
 
+def print_king_safety_analysis(analysis_result):
+    """Print the king safety analysis in a formatted table"""
+    if not analysis_result:
+        print("No analysis available.")
+        return
+        
+    features = analysis_result.get("features")
+    
+    if not features:
+        return
+        
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}KING SAFETY ANALYSIS{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Format safety scores with color indicators
+    def format_safety(safety_value):
+        if safety_value > 0:
+            return f"{Fore.GREEN}{safety_value:.1f}{Style.RESET_ALL}"
+        elif safety_value < -200:
+            return f"{Fore.RED}{safety_value:.1f}{Style.RESET_ALL}"
+        else:
+            return f"{Fore.YELLOW}{safety_value:.1f}{Style.RESET_ALL}"
+    
+    # Format vulnerability spikes with color indicators  
+    def format_vulnerability(value):
+        if value <= 1:
+            return f"{Fore.GREEN}{value:.0f}{Style.RESET_ALL}"
+        elif value <= 3:
+            return f"{Fore.YELLOW}{value:.0f}{Style.RESET_ALL}"
+        else:
+            return f"{Fore.RED}{value:.0f}{Style.RESET_ALL}"
+    
+    # Display the king safety metrics
+    print(f"White King Safety (Average): {format_safety(features.white_king_safety)}")
+    print(f"Black King Safety (Average): {format_safety(features.black_king_safety)}")
+    print(f"White King Safety (Minimum): {format_safety(features.white_king_safety_min)}")
+    print(f"Black King Safety (Minimum): {format_safety(features.black_king_safety_min)}")
+    print(f"White Vulnerability Spikes: {format_vulnerability(features.white_vulnerability_spikes)}")
+    print(f"Black Vulnerability Spikes: {format_vulnerability(features.black_vulnerability_spikes)}")
+    
+    print("\nInterpreting King Safety Scores:")
+    print(f"  {Fore.GREEN}Positive values{Style.RESET_ALL}: King is well protected")
+    print(f"  {Fore.YELLOW}Slight negative{Style.RESET_ALL}: Some weaknesses in king position")
+    print(f"  {Fore.RED}Strong negative{Style.RESET_ALL}: King is vulnerable to attack")
+    
+    print("\nVulnerability Spikes indicate sudden drops in king safety,")
+    print("which often coincide with tactical opportunities for the opponent.")
+    
+    print("="*80)
+
 def print_analysis_table(analysis_result):
     """Print the game analysis as a formatted table"""
     if not analysis_result:
@@ -408,6 +459,7 @@ def main():
     print_analysis_table(analysis_result)
     print_feature_summary(analysis_result.get("features"))
     print_sharpness_summary(analysis_result.get("cumulative_sharpness"))
+    print_king_safety_analysis(analysis_result)  
     
     # Save to file if requested
     if args.output:
