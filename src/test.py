@@ -97,6 +97,10 @@ def print_analysis_table(analysis_result):
     judgments = analysis_result.get("judgments", [])
     top_moves = analysis_result.get("top_moves", [])
     sharpness_scores = analysis_result.get("sharpness", [])
+    move_accuracies = analysis_result.get("move_accuracies", [])
+    
+    # Create a map of move accuracies for easy lookup
+    accuracy_map = {(m["move_number"], m["player"]): m["accuracy"] for m in move_accuracies}
     
     moves_list = []
     
@@ -170,6 +174,21 @@ def print_analysis_table(analysis_result):
         else:
             eval_change = ""
             
+        # Get move accuracy
+        player = "white" if is_white_move else "black"
+        accuracy = accuracy_map.get((move_num, player), 0.0)
+        
+        # Format accuracy with color
+        def format_accuracy(acc_value):
+            if acc_value >= 90:
+                return f"{Fore.GREEN}{acc_value:.1f}%{Style.RESET_ALL}"
+            elif acc_value >= 70:
+                return f"{Fore.YELLOW}{acc_value:.1f}%{Style.RESET_ALL}"
+            else:
+                return f"{Fore.RED}{acc_value:.1f}%{Style.RESET_ALL}"
+        
+        accuracy_str = format_accuracy(accuracy)
+            
         # Add row to the table
         if is_white_move:
             moves_list.append([
@@ -180,6 +199,7 @@ def print_analysis_table(analysis_result):
                 eval_change,
                 format_sharpness(current_sharpness),
                 judgment_str,
+                accuracy_str,
                 top_moves_str[:20] + ("..." if len(top_moves_str) > 20 else "")
             ])
         else:
@@ -191,6 +211,7 @@ def print_analysis_table(analysis_result):
                 eval_change,
                 format_sharpness(current_sharpness),
                 judgment_str,
+                accuracy_str,
                 top_moves_str[:20] + ("..." if len(top_moves_str) > 20 else "")
             ])
             move_num += 1
@@ -201,8 +222,8 @@ def print_analysis_table(analysis_result):
     
     # Create headers for the table
     headers = [
-        "#", "White", "Eval Before", "Eval After", "Change", "Sharpness", "Judgment", "Top Moves",
-        "Black", "Eval Before", "Eval After", "Change", "Sharpness", "Judgment", "Top Moves"
+        "#", "White", "Eval Before", "Eval After", "Change", "Sharpness", "Judgment", "Accuracy", "Top Moves",
+        "Black", "Eval Before", "Eval After", "Change", "Sharpness", "Judgment", "Accuracy", "Top Moves"
     ]
     
     # Print the table
@@ -230,12 +251,14 @@ def print_feature_summary(features):
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
             "white_inaccuracy_count", "white_mistake_count", "white_blunder_count",
-            "white_sacrifice_count", "white_avg_eval_change", "white_eval_volatility"
+            "white_sacrifice_count", "white_avg_eval_change", "white_eval_volatility",
+            "white_accuracy"
         ],
         "Black Move Quality": [
             "black_brilliant_count", "black_great_count", "black_good_moves",
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
-            "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility"
+            "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
+            "black_accuracy"
         ]
     }
     
@@ -245,7 +268,15 @@ def print_feature_summary(features):
         for name in feature_names:
             if hasattr(features, name):
                 value = getattr(features, name)
-                if isinstance(value, (int, float)):
+                if name == "white_accuracy" or name == "black_accuracy":
+                    # Format accuracy with color
+                    if value >= 90:
+                        print(f"  {name}: {Fore.GREEN}{value:.1f}%{Style.RESET_ALL}")
+                    elif value >= 70:
+                        print(f"  {name}: {Fore.YELLOW}{value:.1f}%{Style.RESET_ALL}")
+                    else:
+                        print(f"  {name}: {Fore.RED}{value:.1f}%{Style.RESET_ALL}")
+                elif isinstance(value, (int, float)):
                     print(f"  {name}: {value:.2f}")
                 else:
                     print(f"  {name}: {value}")

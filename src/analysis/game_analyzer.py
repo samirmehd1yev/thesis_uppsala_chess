@@ -9,6 +9,7 @@ from multiprocessing import Pool, Manager
 import time
 from tqdm import tqdm
 import os
+import math
 
 from features.extractor import FeatureExtractor
 from analysis.stockfish_handler import StockfishHandler
@@ -91,6 +92,9 @@ class GameAnalyzer:
             - top_moves: List of top moves for each position
             - sharpness: List of sharpness scores for each position
             - cumulative_sharpness: Cumulative sharpness scores for the game
+            - move_accuracies: List of accuracy scores for each move
+            - white_accuracy: Overall accuracy for white player
+            - black_accuracy: Overall accuracy for black player
         """
         logger.info("Starting game analysis...")
         start_time = time.time()
@@ -136,6 +140,19 @@ class GameAnalyzer:
             print(f"Debug: White's cumulative sharpness: {cumulative_sharpness['white_sharpness']:.2f} (positions where White is to move)")
             print(f"Debug: Black's cumulative sharpness: {cumulative_sharpness['black_sharpness']:.2f} (positions where Black is to move)")
             
+            # Calculate move accuracies
+            logger.info("Calculating move accuracies...")
+            move_accuracies = self._calculate_move_accuracies(positions, evals)
+            
+            # Calculate overall player accuracies
+            white_accuracy, black_accuracy = self._calculate_player_accuracies(move_accuracies, positions)
+            print(f"Debug: White's accuracy: {white_accuracy:.1f}%")
+            print(f"Debug: Black's accuracy: {black_accuracy:.1f}%")
+            
+            # Set accuracy values in the feature vector
+            features.white_accuracy = white_accuracy
+            features.black_accuracy = black_accuracy
+            
             logger.info(f"Total analysis completed in {time.time() - start_time:.2f} seconds")
             
             return {
@@ -145,7 +162,10 @@ class GameAnalyzer:
                 "features": features,
                 "top_moves": top_moves,
                 "sharpness": sharpness_scores,
-                "cumulative_sharpness": cumulative_sharpness
+                "cumulative_sharpness": cumulative_sharpness,
+                "move_accuracies": move_accuracies,
+                "white_accuracy": white_accuracy,
+                "black_accuracy": black_accuracy
             }
             
         except Exception as e:
@@ -307,6 +327,163 @@ class GameAnalyzer:
             logger.error(f"Error analyzing move: {e}")
             return Judgment.GOOD  # Default to GOOD on error
     
+    def _calculate_move_accuracies(self, positions: List[chess.Board], evals: List[Info]) -> List[Dict[str, float]]:
+        """
+        Calculate accuracy for each move based on the change in winning percentages.
+        
+        Args:
+            positions: List of chess board positions
+            evals: List of evaluation information for each position
+            
+        Returns:
+            List of dictionaries containing move accuracy information
+        """
+        move_accuracies = []
+        
+        # We need at least 2 positions to calculate accuracy for 1 move
+        if len(positions) < 2 or len(evals) < 2:
+            return move_accuracies
+            
+        for i in range(len(positions) - 1):  # We calculate accuracy for each move except the last position
+            # Determine whose move it was
+            player_color = "white" if positions[i].turn == chess.WHITE else "black"
+            
+            # Get evaluation before the move
+            eval_before = evals[i]
+            eval_after = evals[i+1]
+            
+            # Convert the eval format from {'type': 'cp', 'value': X} to {'cp': X} or {'mate': X}
+            if hasattr(eval_before, 'eval') and eval_before.eval:
+                eval_type_before = eval_before.eval.get('type')
+                eval_value_before = eval_before.eval.get('value')
+                score_dict_before = {eval_type_before: eval_value_before} if eval_type_before and eval_value_before is not None else {"cp": 0}
+            else:
+                score_dict_before = {"cp": 0}
+                
+            if hasattr(eval_after, 'eval') and eval_after.eval:
+                eval_type_after = eval_after.eval.get('type')
+                eval_value_after = eval_after.eval.get('value')
+                score_dict_after = {eval_type_after: eval_value_after} if eval_type_after and eval_value_after is not None else {"cp": 0}
+            else:
+                score_dict_after = {"cp": 0}
+            
+            # Get win percentages from the player's perspective
+            win_percent_before = MoveAnalyzer.pov_chances(player_color, score_dict_before)
+            win_percent_after = MoveAnalyzer.pov_chances(player_color, score_dict_after)
+            
+            # Calculate accuracy for this move
+            accuracy = MoveAnalyzer.calculate_move_accuracy(win_percent_before, win_percent_after)
+            
+            move_accuracies.append({
+                "move_number": (i // 2) + 1 if i % 2 == 0 else i // 2 + 1,  # Chess move numbering
+                "player": player_color,
+                "accuracy": accuracy,
+                "win_percent_before": win_percent_before * 100,  # Convert to percentage
+                "win_percent_after": win_percent_after * 100,    # Convert to percentage
+            })
+            
+        return move_accuracies
+    
+    def _calculate_player_accuracies(self, move_accuracies: List[Dict[str, float]], positions: List[chess.Board]) -> Tuple[float, float]:
+        """
+        Calculate overall accuracy for white and black players using Lichess approach.
+        
+        Computes a mix of weighted mean (based on position volatility) and harmonic mean
+        of individual move accuracies.
+        
+        Args:
+            move_accuracies: List of dictionaries containing move accuracy information
+            positions: List of chess board positions
+            
+        Returns:
+            Tuple of (white_accuracy, black_accuracy)
+        """
+        if not move_accuracies:
+            return 0.0, 0.0
+            
+        # Get all win percentages for volatility calculation
+        all_win_percents = []
+        
+        # Add the initial position (like Lichess's Cp.initial)
+        all_win_percents.append(0.5)  # 50% win chance for starting position
+        
+        # Add all win percentages from moves
+        for acc in move_accuracies:
+            if "win_percent_before" in acc and acc["win_percent_before"] is not None:
+                all_win_percents.append(acc["win_percent_before"] / 100.0)  # Convert to 0-1 range
+            if "win_percent_after" in acc and acc["win_percent_after"] is not None:
+                all_win_percents.append(acc["win_percent_after"] / 100.0)  # Convert to 0-1 range
+                
+        # Calculate window size based on game length (like Lichess)
+        window_size = min(max(2, len(positions) // 10), 8)  # Between 2 and 8 positions
+        
+        # Create windows for volatility calculation
+        windows = []
+        
+        # First add window_size - 2 copies of the first window
+        first_window = all_win_percents[:window_size]
+        for _ in range(min(window_size - 2, len(first_window) - 2)):
+            windows.append(first_window)
+            
+        # Then add all sliding windows
+        for i in range(len(all_win_percents) - window_size + 1):
+            windows.append(all_win_percents[i:i+window_size])
+            
+        # Calculate standard deviation for each window (volatility/complexity weight)
+        weights = []
+        for window in windows:
+            if len(window) >= 2:
+                # Calculate standard deviation (Lichess's Maths.standardDeviation)
+                mean = sum(window) / len(window)
+                variance = sum((x - mean) ** 2 for x in window) / len(window)
+                stdev = math.sqrt(variance)
+                # Clamp between 0.5 and 12 (like Lichess)
+                weight = max(0.5, min(12, stdev))
+                weights.append(weight)
+            else:
+                weights.append(0.5)  # Default minimum weight
+                
+        # Pair moves with weights (similar to Lichess's zip(allWinPercents.sliding(2), weights))
+        weighted_accuracies_by_color = {"white": [], "black": []}
+        
+        for i, acc in enumerate(move_accuracies):
+            if i < len(weights):
+                weight = weights[i]
+                color = acc["player"]
+                accuracy = acc["accuracy"]
+                weighted_accuracies_by_color[color].append((accuracy, weight))
+                
+        def weighted_mean(weighted_values):
+            """Calculate weighted mean like Lichess's Maths.weightedMean"""
+            if not weighted_values:
+                return 0.0
+            total_weight = sum(weight for _, weight in weighted_values)
+            if total_weight == 0:
+                return 0.0
+            return sum(value * weight for value, weight in weighted_values) / total_weight
+            
+        def harmonic_mean(values):
+            """Calculate harmonic mean like Lichess's Maths.harmonicMean"""
+            if not values:
+                return 0.0
+            # Filter out zeros to avoid division by zero
+            non_zero_values = [v for v in values if v > 0]
+            if not non_zero_values:
+                return 0.0
+            return len(non_zero_values) / sum(1.0 / v for v in non_zero_values)
+            
+        # Calculate white accuracy (exactly like Lichess)
+        white_weighted = weighted_mean(weighted_accuracies_by_color["white"])
+        white_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["white"]])
+        white_accuracy = (white_weighted + white_harmonic) / 2
+        
+        # Calculate black accuracy (exactly like Lichess)
+        black_weighted = weighted_mean(weighted_accuracies_by_color["black"])
+        black_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["black"]])
+        black_accuracy = (black_weighted + black_harmonic) / 2
+        
+        return white_accuracy, black_accuracy
+    
     def format_analysis_report(self, analysis_result: Dict[str, Any], html: bool = False) -> str:
         """
         Format the analysis results as a text or HTML report.
@@ -345,6 +522,14 @@ class GameAnalyzer:
             report.append("Game Feature Summary")
             report.append("-------------------")
             
+            # Add player accuracies
+            report.append("Player Accuracies:")
+            white_accuracy = analysis_result.get("white_accuracy", 0.0)
+            black_accuracy = analysis_result.get("black_accuracy", 0.0)
+            report.append(f"  White Accuracy: {white_accuracy:.1f}%")
+            report.append(f"  Black Accuracy: {black_accuracy:.1f}%")
+            report.append("")
+            
             # Game phase
             report.append("Game Phase:")
             report.append(f"  Total Moves: {features.total_moves:.0f}")
@@ -382,6 +567,91 @@ class GameAnalyzer:
             report.append(f"  Blunders: {features.black_blunder_count:.0f}")
             report.append(f"  Sacrifices: {features.black_sacrifice_count:.0f}")
             
+        # Add move-by-move analysis
+        if evals and judgments:
+            report.append("Move-by-Move Analysis")
+            report.append("--------------------")
+            move_accuracies = analysis_result.get("move_accuracies", [])
+            accuracy_map = {(m["move_number"], m["player"]): m["accuracy"] for m in move_accuracies}
+            
+            board = chess.Board()
+            node = game.game()
+            
+            move_num = 1
+            current_player = "white"
+            moves_analyzed = 0
+            
+            while not node.is_end() and moves_analyzed < len(judgments):
+                next_node = node.variations[0]
+                move = next_node.move
+                san = board.san(move)
+                
+                # Add move number and player indicator
+                if current_player == "white":
+                    move_str = f"{move_num}. {san}"
+                else:
+                    move_str = f"{move_num}... {san}"
+                
+                # Get judgment for the move
+                judgment = judgments[moves_analyzed] if moves_analyzed < len(judgments) else None
+                
+                # Get accuracy for the move
+                accuracy = accuracy_map.get((move_num, current_player), 0.0)
+                
+                if judgment:
+                    report.append(f"{move_str}: {judgment.name} (Accuracy: {accuracy:.1f}%)")
+                else:
+                    report.append(f"{move_str}")
+                
+                # Update for next move
+                board.push(move)
+                node = next_node
+                moves_analyzed += 1
+                
+                # Update move number and player
+                if current_player == "black":
+                    move_num += 1
+                current_player = "black" if current_player == "white" else "white"
+            
+            report.append("")
+        
+        # Add detailed move accuracy table
+        move_accuracies = analysis_result.get("move_accuracies", [])
+        if move_accuracies:
+            report.append("Detailed Move Accuracies")
+            report.append("------------------------")
+            
+            # Table header
+            if html:
+                report.append("<table border='1'>")
+                report.append("<tr><th>Move</th><th>Player</th><th>Accuracy</th><th>Win% Before</th><th>Win% After</th></tr>")
+            else:
+                report.append(f"{'Move':<6} {'Player':<8} {'Accuracy':<10} {'Win% Before':<12} {'Win% After':<12}")
+                report.append("-" * 60)
+            
+            # Table rows
+            for move in move_accuracies:
+                move_num = move["move_number"]
+                player = move["player"].capitalize()
+                accuracy = move["accuracy"]
+                win_before = move["win_percent_before"]
+                win_after = move["win_percent_after"]
+                
+                if html:
+                    report.append(f"<tr><td>{move_num}{'' if player == 'White' else '...'}</td>"
+                                 f"<td>{player}</td>"
+                                 f"<td>{accuracy:.1f}%</td>"
+                                 f"<td>{win_before:.1f}%</td>"
+                                 f"<td>{win_after:.1f}%</td></tr>")
+                else:
+                    move_str = f"{move_num}{'' if player == 'White' else '...'}"
+                    report.append(f"{move_str:<6} {player:<8} {accuracy:.1f}%{'':<5} {win_before:.1f}%{'':<5} {win_after:.1f}%")
+            
+            if html:
+                report.append("</table>")
+            
+            report.append("")
+        
         # Format as HTML if needed
         if html:
             html_report = "<html><head><style>"

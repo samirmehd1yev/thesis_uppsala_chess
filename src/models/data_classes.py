@@ -85,6 +85,7 @@ class FeatureVector:
     white_avg_eval_change: float = 0.0
     white_eval_volatility: float = 0.0
     white_sacrifice_count: float = 0.0  # New: Count of sacrifices by White
+    white_accuracy: float = 0.0         # New: Overall accuracy for White
     
     # Move Quality Features - Black
     black_brilliant_count: float = 0.0  # New
@@ -96,6 +97,7 @@ class FeatureVector:
     black_avg_eval_change: float = 0.0
     black_eval_volatility: float = 0.0
     black_sacrifice_count: float = 0.0  # New: Count of sacrifices by Black
+    black_accuracy: float = 0.0         # New: Overall accuracy for Black
     
     # Statistical Features
     center_control_avg: float = 0.0

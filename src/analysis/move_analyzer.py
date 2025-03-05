@@ -24,15 +24,146 @@ class MoveAnalyzer:
         chess.QUEEN: 9,
         chess.KING: 0  # King value is not used in evaluation
     }
-
+    
+    # Lichess exact multiplier
+    WINNING_CHANCES_MULTIPLIER = -0.00368208
+    
+    @staticmethod
+    def raw_winning_chances(cp: int) -> float:
+        """
+        Raw winning chances calculation using Lichess' exact formula.
+        https://github.com/lichess-org/lila/pull/11148
+        """
+        try:
+            return 2 / (1 + math.exp(MoveAnalyzer.WINNING_CHANCES_MULTIPLIER * cp)) - 1
+        except Exception as e:
+            logger.warning(f"Error calculating raw winning chances for cp={cp}: {e}")
+            return 0.0  # Neutral value on error
+    
+    @staticmethod
+    def cp_winning_chances(cp: int) -> float:
+        """
+        Winning chances for centipawn evaluation with capped values.
+        """
+        capped_cp = min(max(-1000, cp), 1000)
+        return MoveAnalyzer.raw_winning_chances(capped_cp)
+    
+    @staticmethod
+    def mate_winning_chances(mate: int) -> float:
+        """
+        Calculate winning chances for a mate score.
+        
+        Args:
+            mate: Number of moves to mate (positive if winning, negative if losing)
+        
+        Returns:
+            Float between -1 and 1 representing winning chances
+        """
+        cp = (21 - min(10, abs(mate))) * 100
+        signed_cp = cp * (1 if mate > 0 else -1)
+        return MoveAnalyzer.raw_winning_chances(signed_cp)
+    
+    @staticmethod
+    def eval_winning_chances(score: Dict[str, Optional[int]]) -> float:
+        """
+        Calculate winning chances from an evaluation score that could be either cp or mate.
+        
+        Args:
+            score: Dictionary with 'cp' or 'mate' key
+        
+        Returns:
+            Float between -1 and 1 representing winning chances
+        """
+        if 'mate' in score and score['mate'] is not None:
+            return MoveAnalyzer.mate_winning_chances(score['mate'])
+        elif 'cp' in score and score['cp'] is not None:
+            return MoveAnalyzer.cp_winning_chances(score['cp'])
+        
+        logger.warning(f"Invalid score format: {score}")
+        return 0.0
+    
     @staticmethod
     def winning_chances(cp: int) -> float:
-        """Convert centipawn evaluation into winning chances using Lichess' formula"""
-        try:
-            return 2 / (1 + math.exp(-0.004 * cp)) - 1
-        except Exception as e:
-            logger.warning(f"Error calculating winning chances for cp={cp}: {e}")
-            return 0.0  # Neutral value on error
+        """
+        Convert centipawn evaluation into winning chances using Lichess' formula.
+        For backward compatibility - delegates to cp_winning_chances.
+        """
+        return MoveAnalyzer.cp_winning_chances(cp)
+    
+    @staticmethod
+    def to_pov(color: str, diff: float) -> float:
+        """
+        Adjust a value based on the player's point of view
+        
+        Args:
+            color: 'white' or 'black'
+            diff: The value to adjust
+            
+        Returns:
+            Adjusted value based on color's perspective
+        """
+        return diff if color == 'white' else -diff
+    
+    @staticmethod
+    def pov_chances(color: str, eval_score: Dict[str, Optional[int]]) -> float:
+        """
+        Calculate winning chances from a player's point of view
+        
+        Args:
+            color: 'white' or 'black'
+            eval_score: Evaluation score with 'cp' or 'mate' key
+            
+        Returns:
+            Winning chances from the perspective of the given color
+        """
+        return MoveAnalyzer.to_pov(color, MoveAnalyzer.eval_winning_chances(eval_score))
+    
+    @staticmethod
+    def pov_diff(color: str, eval1: Dict[str, Optional[int]], eval2: Dict[str, Optional[int]]) -> float:
+        """
+        Compute the difference in winning chances between two evaluations from a player's perspective
+        
+        Args:
+            color: 'white' or 'black'
+            eval1: First evaluation
+            eval2: Second evaluation
+            
+        Returns:
+            Difference in winning chances, normalized to -1 to 1 range
+        """
+        return (MoveAnalyzer.pov_chances(color, eval1) - MoveAnalyzer.pov_chances(color, eval2)) / 2
+    
+    @staticmethod
+    def are_similar_evals(color: str, best_eval: Dict[str, Optional[int]], second_best_eval: Dict[str, Optional[int]]) -> bool:
+        """
+        Check if two evaluations are similar enough (used for puzzle validation)
+        
+        Args:
+            color: 'white' or 'black'
+            best_eval: Best move evaluation
+            second_best_eval: Second best move evaluation
+            
+        Returns:
+            True if evaluations are similar enough
+        """
+        return MoveAnalyzer.pov_diff(color, best_eval, second_best_eval) < 0.14
+    
+    @staticmethod
+    def has_multiple_solutions(color: str, best_eval: Dict[str, Optional[int]], second_best_eval: Dict[str, Optional[int]]) -> bool:
+        """
+        Check if a position has multiple good solutions (used for puzzle validation)
+        
+        Args:
+            color: 'white' or 'black'
+            best_eval: Best move evaluation
+            second_best_eval: Second best move evaluation
+            
+        Returns:
+            True if multiple good solutions exist
+        """
+        # if second best eval equivalent of cp is >= 200
+        return (MoveAnalyzer.pov_chances(color, second_best_eval) >= 0.3524 or
+                MoveAnalyzer.are_similar_evals(color, best_eval, second_best_eval))
     
     @staticmethod
     def is_piece_sacrifice(prev_board: chess.Board, curr_board: chess.Board, move: chess.Move) -> bool:
@@ -488,3 +619,41 @@ class MoveAnalyzer:
             prev, curr, prev_board, curr_board, move, None
         )
         return judgment
+
+    @staticmethod
+    def calculate_move_accuracy(win_percent_before: float, win_percent_after: float) -> float:
+        """
+        Calculate move accuracy percentage based on the difference in winning chances.
+        
+        Uses the exact Lichess formula from their codebase.
+        
+        Args:
+            win_percent_before: Winning percentage before the move (0.0 to 1.0)
+            win_percent_after: Winning percentage after the move (0.0 to 1.0)
+            
+        Returns:
+            Accuracy percentage (0 to 100)
+        """
+        try:
+            # Handle None values
+            if win_percent_before is None or win_percent_after is None:
+                return 100.0
+            
+            # If the position improved or stayed the same, return 100%
+            if win_percent_after >= win_percent_before:
+                return 100.0
+                
+            # Calculate the drop in winning percentage (0-100 range)
+            win_diff = (win_percent_before - win_percent_after) * 100
+            
+            # Exact Lichess formula
+            raw = 103.1668100711649 * math.exp(-0.04354415386753951 * win_diff) + -3.166924740191411
+            
+            # Add +1 uncertainty bonus (due to imperfect analysis)
+            accuracy = raw + 1.0
+            
+            # Clamp the result between 0 and 100
+            return max(0, min(100, accuracy))
+        except Exception as e:
+            logger.warning(f"Error calculating move accuracy: {e}")
+            return 0.0  # Return 0 accuracy on error
