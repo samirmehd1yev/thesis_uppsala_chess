@@ -79,6 +79,7 @@ results/*
 # Windows
 Thumbs.db
 
+my_env/
 
 archive/*
 all_python_files.txt
