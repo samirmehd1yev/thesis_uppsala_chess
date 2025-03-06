@@ -189,6 +189,15 @@ if __name__ == "__main__":
     db_path = "../../data/processed/chess_games.db"
     log_dir = "../../logs"
     
+    # get head of csv file
+    df = pd.read_csv(csv_path, nrows=10)
+    print('head of csv file:')
+    print(df.head())
+    print('column names:')
+    print(df.columns)
+    print('column dtypes:')
+    print(df.dtypes)
+    
     # Setup logging
     logger = setup_logging(log_dir)
     

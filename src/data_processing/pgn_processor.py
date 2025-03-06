@@ -9,38 +9,28 @@ Key optimizations:
 - Now saves pure PGN, separate move text, clock_info, and eval_info where available
 """
 
-import os
 import csv
 import re
 import json
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional
-import chess.pgn  # if needed by downstream code
 from tqdm import tqdm
 from dataclasses import dataclass, field
 from datetime import datetime
 import multiprocessing as mp
-from itertools import islice
 import mmap
-import io
-import pickle
-import signal
-import sys
 from functools import lru_cache
-import numpy as np
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import threading
-from queue import Queue
 import tempfile
-import shutil
 import pandas as pd
 
 # Project structure setup
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 LOGS_DIR = PROJECT_ROOT / "logs"
-INPUT_DIR = DATA_DIR / "raw_pgn"
+INPUT_DIR = DATA_DIR / "raw"
 BASE_OUTPUT_DIR = DATA_DIR / "processed"
 OUTPUT_DIR = BASE_OUTPUT_DIR / "lumbrasgigabase"
 INDIVIDUAL_DIR = OUTPUT_DIR / "individual"
@@ -50,15 +40,10 @@ INTERIM_DIR = DATA_DIR / "interim"
 for directory in [LOGS_DIR, OUTPUT_DIR, INDIVIDUAL_DIR, INTERIM_DIR]:
     directory.mkdir(parents=True, exist_ok=True)
 
-# Output files
-FINAL_OUTPUT = OUTPUT_DIR / "lumbrasgigabase.csv"
-if FINAL_OUTPUT.exists():
-    FINAL_OUTPUT.unlink()
-
 # Optimized constants
 CHUNK_SIZE = 1024 * 1024  # 1MB chunks for better memory efficiency
 NUM_PROCESSES = max(1, mp.cpu_count())  # Use all available CPUs
-BATCH_SIZE = 5000  # Increased batch size for better I/O performance
+BATCH_SIZE = 5000
 
 # Pre-compile regex patterns for better performance
 EVAL_PATTERN = re.compile(rb'\[%eval ([^\]]+)\]')
@@ -105,7 +90,6 @@ class ChessGame:
     moves: str = field(default="")        # Cleaned moves (only moves)
     eval_info: Optional[str] = field(default=None)   # JSON string for evaluation info
     clock_info: Optional[str] = field(default=None)  # JSON string for clock info
-    pgn: str = field(default="")          # Pure original PGN text
 
     def clean_string(self, s: str) -> str:
         """Clean string values."""
@@ -142,8 +126,7 @@ class ChessGame:
             "source": self.source,
             "moves": self.clean_moves(self.moves),
             "eval_info": self.eval_info,
-            "clock_info": self.clock_info,
-            "pgn": self.clean_string(self.pgn)
+            "clock_info": self.clock_info
         }
 
 class FastPGNParser:
@@ -161,8 +144,6 @@ class FastPGNParser:
            Saves the full PGN text, separates the moves, evaluation info, and clock info.
         """
         try:
-            # Decode the entire PGN text and store it as the pure PGN.
-            full_pgn = self._decode_bytes(raw_game).strip()
             
             headers = {}
             for match in HEADERS_PATTERN.finditer(raw_game):
@@ -209,8 +190,7 @@ class FastPGNParser:
                 import_date=headers.get("ImportDate", ""),
                 moves=moves_text,
                 eval_info=eval_json,
-                clock_info=clk_json,
-                pgn=full_pgn
+                clock_info=clk_json
             )
             return game
         
@@ -347,44 +327,12 @@ def process_file(input_file: Path) -> int:
     individual_writer.finalize()
     return total_games
 
-def merge_all_csvs():
-    """Merge all individual CSV files into final combined output."""
-    logging.info("Merging all individual CSV files into final output...")
-    
-    # Get all CSV files from the individual directory
-    csv_files = list(INDIVIDUAL_DIR.glob('*.csv'))
-    if not csv_files:
-        logging.warning("No CSV files found to merge")
-        return
-    
-    # Initialize final output with header from the first file
-    first_file = csv_files[0]
-    with open(first_file, 'r', newline='', encoding='utf-8') as infile:
-        header = infile.readline()
-    
-    with open(FINAL_OUTPUT, 'w', newline='', encoding='utf-8') as outfile:
-        outfile.write(header)
-        
-        # Merge all files
-        with tqdm(total=len(csv_files), desc="Merging files") as pbar:
-            for file in csv_files:
-                with open(file, 'r', newline='', encoding='utf-8') as infile:
-                    next(infile)  # Skip header
-                    for line in infile:
-                        outfile.write(line)
-                pbar.update(1)
-    
-    logging.info(f"Successfully merged all files into {FINAL_OUTPUT}")
 
 def main():
     """Main processing function with optimized file handling."""
     try:
         start_time = datetime.now()
         logging.info(f"Starting processing at {start_time}")
-        
-        # Reset final output if it exists
-        if FINAL_OUTPUT.exists():
-            FINAL_OUTPUT.unlink()
         
         total_games = 0
         input_files = sorted(
@@ -398,8 +346,6 @@ def main():
             total_games += games_processed
             logging.info(f"Processed {games_processed} games from {input_file.name}")
         
-        # Merge all individual CSV files into the final output
-        merge_all_csvs()
         
         end_time = datetime.now()
         processing_time = end_time - start_time
@@ -407,11 +353,7 @@ def main():
         logging.info(f"\nProcessing completed at {end_time}")
         logging.info(f"Total processing time: {processing_time}")
         logging.info(f"Total games processed: {total_games}")
-        logging.info(f"Final output saved to: {FINAL_OUTPUT}")
         
-        # head of merged CSV
-        df = pd.read_csv(FINAL_OUTPUT)
-        print(df.head())
         
         
     except Exception as e:
