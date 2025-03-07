@@ -1,0 +1,11 @@
+{
+  "completed_batches": [
+    0,
+    1
+  ],
+  "last_completed_batch": 1,
+  "total_batches": 5,
+  "batch_size": 100,
+  "total_games": 500,
+  "games_processed": 200
+}
