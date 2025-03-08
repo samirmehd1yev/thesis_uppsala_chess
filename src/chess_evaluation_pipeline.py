@@ -500,7 +500,8 @@ def main():
                         row.get('white', ''), 
                         row.get('black', ''), 
                         row.get('date', ''), 
-                        row.get('event', '')
+                        row.get('event', ''),
+                        row.get('moves', '')
                     )
                     processed_games.add(game_key)
             
@@ -516,7 +517,8 @@ def main():
                 row.get('white', ''), 
                 row.get('black', ''), 
                 row.get('date', ''), 
-                row.get('event', '')
+                row.get('event', ''),
+                row.get('moves', '')
             )
             if game_key not in processed_games:
                 df_to_process.append(row)

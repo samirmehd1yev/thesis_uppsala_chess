@@ -554,7 +554,7 @@ class MoveAnalyzer:
                 
             # Handle missing cp values
             if prev.cp is None or curr.cp is None:
-                logger.warning("Missing evaluation cp value(s), defaulting to GOOD")
+                logger.warning(f"Missing evaluation cp value(s), defaulting to GOOD: {prev.cp}, {curr.cp}")
                 reason += " | GOOD: Missing evaluation data"
                 return (Judgment.GOOD, reason)
                 

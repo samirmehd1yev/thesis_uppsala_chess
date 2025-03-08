@@ -38,7 +38,7 @@ python3 /proj/chess/thesis_uppsala_chess_samir/src/chess_evaluation_pipeline.py 
     --threads 1 \
     --hash 128 \
     --chunk-size 100 \
-    --max-games 500
+    --resume
 
 # Print end time
 echo "End time: $(date)"
