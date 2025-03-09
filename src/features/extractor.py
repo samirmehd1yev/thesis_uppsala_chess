@@ -44,11 +44,22 @@ class FeatureExtractor:
         features.middlegame_length = middlegame_length
         features.endgame_length = endgame_length
         
-        # Material and position features
-        features.material_balance_changes = self._calculate_material_changes(positions)
-        features.piece_mobility_avg = self._calculate_mobility(positions)
-        features.pawn_structure_changes = self._calculate_pawn_changes(positions)
-        features.center_control_avg = self._calculate_center_control(positions)
+        # Material and position features - separate for white and black
+        white_material, black_material = self._calculate_material_changes_by_color(positions)
+        features.white_material_changes = white_material
+        features.black_material_changes = black_material
+        
+        white_mobility, black_mobility = self._calculate_mobility_by_color(positions)
+        features.white_piece_mobility_avg = white_mobility
+        features.black_piece_mobility_avg = black_mobility
+        
+        white_pawn_changes, black_pawn_changes = self._calculate_pawn_changes_by_color(positions)
+        features.white_pawn_structure_changes = white_pawn_changes
+        features.black_pawn_structure_changes = black_pawn_changes
+        
+        white_center, black_center = self._calculate_center_control_by_color(positions)
+        features.white_center_control_avg = white_center
+        features.black_center_control_avg = black_center
         
         # King safety features - new addition
         king_safety_metrics = self._calculate_king_safety(positions)
@@ -260,18 +271,18 @@ class FeatureExtractor:
         positions.append(board.copy())  # Final position
         return positions
         
-    def _calculate_material_changes(self, positions: List[chess.Board]) -> float:
+    def _calculate_material_changes_by_color(self, positions: List[chess.Board]) -> tuple:
         """
-        Calculate rate of material balance changes
+        Calculate rate of material changes separately for white and black
         
         Args:
             positions: List of board positions
             
         Returns:
-            Rate of material balance changes (0-1)
+            Tuple of (white_changes_rate, black_changes_rate)
         """
         if not positions:
-            return 0.0
+            return 0.0, 0.0
             
         material_values = {
             chess.PAWN: 1,
@@ -281,112 +292,158 @@ class FeatureExtractor:
             chess.QUEEN: 9
         }
         
-        changes = 0
+        white_changes = 0
+        black_changes = 0
+        
         for i in range(1, len(positions)):
-            prev_mat = self._get_material_value(positions[i-1], material_values)
-            curr_mat = self._get_material_value(positions[i], material_values)
-            if prev_mat != curr_mat:
-                changes += 1
+            prev_white_mat = self._get_material_value_for_color(positions[i-1], material_values, chess.WHITE)
+            curr_white_mat = self._get_material_value_for_color(positions[i], material_values, chess.WHITE)
+            
+            prev_black_mat = self._get_material_value_for_color(positions[i-1], material_values, chess.BLACK)
+            curr_black_mat = self._get_material_value_for_color(positions[i], material_values, chess.BLACK)
+            
+            if prev_white_mat != curr_white_mat:
+                white_changes += 1
                 
-        return changes / (len(positions) - 1) if len(positions) > 1 else 0
+            if prev_black_mat != curr_black_mat:
+                black_changes += 1
+                
+        white_change_rate = white_changes / (len(positions) - 1) if len(positions) > 1 else 0
+        black_change_rate = black_changes / (len(positions) - 1) if len(positions) > 1 else 0
+        
+        return white_change_rate, black_change_rate
     
-    def _get_material_value(self, board: chess.Board, values: Dict[chess.PieceType, int]) -> int:
+    def _get_material_value_for_color(self, board: chess.Board, values: Dict[chess.PieceType, int], color: chess.Color) -> int:
         """
-        Get total material value on board
+        Get total material value for a specific color
         
         Args:
             board: Chess board to evaluate
             values: Dictionary mapping piece types to values
+            color: Chess color to calculate value for
             
         Returns:
-            Material value from white's perspective
+            Material value for the specified color
         """
         total = 0
         for piece_type, value in values.items():
-            total += len(board.pieces(piece_type, chess.WHITE)) * value
-            total -= len(board.pieces(piece_type, chess.BLACK)) * value
+            total += len(board.pieces(piece_type, color)) * value
         return total
     
-    def _calculate_mobility(self, positions: List[chess.Board]) -> float:
+    def _calculate_mobility_by_color(self, positions: List[chess.Board]) -> tuple:
         """
-        Calculate average piece mobility
+        Calculate average piece mobility separately for white and black
         
         Args:
             positions: List of board positions
             
         Returns:
-            Average number of legal moves per position
+            Tuple of (white_mobility_avg, black_mobility_avg)
         """
         if not positions:
-            return 0.0
+            return 0.0, 0.0
             
-        total_mobility = 0
+        white_mobility_total = 0
+        black_mobility_total = 0
+        white_positions = 0
+        black_positions = 0
+        
         for board in positions:
-            mobility = len(list(board.legal_moves))
-            total_mobility += mobility
-            
-        return total_mobility / len(positions)
+            if board.turn == chess.WHITE:
+                white_mobility_total += len(list(board.legal_moves))
+                white_positions += 1
+            else:
+                black_mobility_total += len(list(board.legal_moves))
+                black_positions += 1
+                
+        white_avg = white_mobility_total / white_positions if white_positions > 0 else 0
+        black_avg = black_mobility_total / black_positions if black_positions > 0 else 0
+        
+        return white_avg, black_avg
     
-    def _calculate_pawn_changes(self, positions: List[chess.Board]) -> float:
+    def _calculate_pawn_changes_by_color(self, positions: List[chess.Board]) -> tuple:
         """
-        Calculate rate of pawn structure changes
+        Calculate rate of pawn structure changes separately for white and black
         
         Args:
             positions: List of board positions
             
         Returns:
-            Rate of pawn structure changes (0-1)
+            Tuple of (white_pawn_changes_rate, black_pawn_changes_rate)
         """
         if not positions or len(positions) <= 1:
-            return 0.0
+            return 0.0, 0.0
             
-        changes = 0
+        white_changes = 0
+        black_changes = 0
+        
         for i in range(1, len(positions)):
-            prev_pawns = self._get_pawn_structure(positions[i-1])
-            curr_pawns = self._get_pawn_structure(positions[i])
-            if prev_pawns != curr_pawns:
-                changes += 1
+            prev_white_pawns = self._get_pawn_structure_for_color(positions[i-1], chess.WHITE)
+            curr_white_pawns = self._get_pawn_structure_for_color(positions[i], chess.WHITE)
+            
+            prev_black_pawns = self._get_pawn_structure_for_color(positions[i-1], chess.BLACK)
+            curr_black_pawns = self._get_pawn_structure_for_color(positions[i], chess.BLACK)
+            
+            if prev_white_pawns != curr_white_pawns:
+                white_changes += 1
                 
-        return changes / (len(positions) - 1)
+            if prev_black_pawns != curr_black_pawns:
+                black_changes += 1
+                
+        white_change_rate = white_changes / (len(positions) - 1)
+        black_change_rate = black_changes / (len(positions) - 1)
+        
+        return white_change_rate, black_change_rate
     
-    def _get_pawn_structure(self, board: chess.Board) -> int:
+    def _get_pawn_structure_for_color(self, board: chess.Board, color: chess.Color) -> int:
         """
-        Get pawn structure hash
+        Get pawn structure hash for a specific color
         
         Args:
             board: Chess board to evaluate
+            color: Chess color to calculate pawn structure for
             
         Returns:
-            Hash value representing pawn structure
+            Hash value representing pawn structure for the specified color
         """
-        white_pawns = board.pieces(chess.PAWN, chess.WHITE)
-        black_pawns = board.pieces(chess.PAWN, chess.BLACK)
-        return white_pawns | (black_pawns << 32)
+        return board.pieces(chess.PAWN, color)
     
-    def _calculate_center_control(self, positions: List[chess.Board]) -> float:
+    def _calculate_center_control_by_color(self, positions: List[chess.Board]) -> tuple:
         """
-        Calculate average center square control
+        Calculate average center square control separately for white and black
         
         Args:
             positions: List of board positions
             
         Returns:
-            Average center control (0-1)
+            Tuple of (white_center_control_avg, black_center_control_avg)
         """
         if not positions:
-            return 0.0
+            return 0.0, 0.0
             
         center_squares = {chess.E4, chess.E5, chess.D4, chess.D5}
-        total_control = 0
+        white_control_total = 0
+        black_control_total = 0
         
         for board in positions:
-            control = 0
-            for square in center_squares:
-                if board.piece_at(square):
-                    control += 1
-            total_control += control / len(center_squares)
+            white_control = 0
+            black_control = 0
             
-        return total_control / len(positions)
+            for square in center_squares:
+                piece = board.piece_at(square)
+                if piece:
+                    if piece.color == chess.WHITE:
+                        white_control += 1
+                    else:
+                        black_control += 1
+            
+            white_control_total += white_control / len(center_squares)
+            black_control_total += black_control / len(center_squares)
+            
+        white_avg = white_control_total / len(positions)
+        black_avg = black_control_total / len(positions)
+        
+        return white_avg, black_avg
         
     def _calculate_quality_metrics(self, evals: List[Info], features: FeatureVector, 
                                   positions: List[chess.Board] = None, 

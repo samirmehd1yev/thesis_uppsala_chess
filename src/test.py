@@ -295,9 +295,13 @@ def print_feature_summary(features):
         "Game Phase": [
             "total_moves", "opening_length", "middlegame_length", "endgame_length"
         ],
-        "Material/Position": [
-            "material_balance_changes", "piece_mobility_avg", 
-            "pawn_structure_changes", "center_control_avg"
+        "Material/Position - White": [
+            "white_material_changes", "white_piece_mobility_avg", 
+            "white_pawn_structure_changes", "white_center_control_avg"
+        ],
+        "Material/Position - Black": [
+            "black_material_changes", "black_piece_mobility_avg", 
+            "black_pawn_structure_changes", "black_center_control_avg"
         ],
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
@@ -413,7 +417,7 @@ def main():
     
     # Default PGN if none provided
     pgn_content = """
-    1. e4 d6 2. d4 Nf6 3. Nc3 g6 4. Be3 Bg7 5. Qd2 c6 6. f3 b5 7. Nge2 Nbd7 8. Bh6 Bxh6 9. Qxh6 Bb7 10. a3 e5 11. O-O-O Qe7 12. Kb1 a6 13. Nc1 O-O-O 14. Nb3 exd4 15. Rxd4 c5 16. Rd1 Nb6 17. g3 Kb8 18. Na5 Ba8 19. Bh3 d5 20. Qf4+ Ka7 21. Rhe1 d4 22. Nd5 Nbxd5 23. exd5 Qd6 24. Rxd4 cxd4 25. Re7+ Kb6 26. Qxd4+ Kxa5 27. b4+ Ka4 28. Qc3 Qxd5 29. Ra7 Bb7 30. Rxb7 Qc4 31. Qxf6 Kxa3 32. Qxa6+ Kxb4 33. c3+ Kxc3 34. Qa1+ Kd2 35. Qb2+ Kd1 36. Bf1 Rd2 37. Rd7 Rxd7 38. Bxc4 bxc4 39. Qxh8 Rd3 40. Qa8 c3 41. Qa4+ Ke1 42. f4 f5 43. Kc1 Rd2 44. Qa7 1-0
+    1.e4 c5 2.Nf3 d6 3.d4 cxd4 4.Nxd4 Nf6 5.Nc3 a6 6.Bg5 e6 7.f4 Qb6 8.Nb3 Nbd7 9.Qe2 Qc7 10.g4 Be7 11.O-O-O h6 12.Bh4 g5 13.fxg5 Nh7 14.Bg3 hxg5 15. e5 Nxe5 16.Ne4 d5 17.Bg2 dxe4 18.Qxe4 Bf6 19.Rde1 Nf8 20.Rhf1 Bg7 21.Bxe5 Qxe5 22.Qxe5 Bxe5 23.Rxe5 Rxh2 24.Be4 Nh7 25.Na5 Ke7 26.Rc5 Nf6 27.Rc7+ Kd6 28.Rxf6 Kxc7 29.Rxf7+ Kd8 30.Nc4 e5 31.Nb6 Rb8 32.Rf8+ Kc7 33.Nd5+ Kd6 34.Nb6 Kc7 35.Nd5+ Kd6 36.Rd8+ Kc6 37.Rg8 Be6 38.Nb4+ Kc7 39.Rg7+ Kd6 40. Rg6 a5 41.Nd5 Rf8 42.b3 Rh3 43.Nb6 Ke7 44.Rg7+ Rf7 45.Rxg5 Rf1+ 46.Kb2 Kf6 47.Rg6+ Kf7 48.Rg5 Kf6 49.Rg6+ Kf7 50.Rg5 1/2-1/2
     """
 #     pgn_content = """
 #         1. e4 c5 2. Nf3 Nc6 3. Bb5 d6 4. O-O Bd7 5. Re1 Nf6 6. c3 a6 7. Ba4 c4 8. d4

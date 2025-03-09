@@ -510,12 +510,28 @@ class MoveAnalyzer:
             
             # Check if move is in top engine moves
             is_top_move = False
-            if move and top_moves and move.uci() == top_moves[0]:
-                is_top_move = True
-                reason += " | TOP MOVE: Matches engine's first choice"
+            if move and top_moves and len(top_moves) > 0:
+                move_uci = move.uci()
                 
-                # Check for brilliant/great moves if we have board information
-                if prev_board and curr_board and move:
+                # Try direct UCI comparison
+                if move_uci in top_moves:
+                    is_top_move = True
+                    logger.debug(f"TOP MOVE (UCI): {move_uci} matches top moves: {top_moves[:3]}")
+                    reason += " | TOP MOVE: Matches engine's first choice"
+                # Try SAN format if we have the board
+                elif prev_board:
+                    try:
+                        # Try to get SAN format of the move
+                        move_san = prev_board.san(move)
+                        if move_san in top_moves:
+                            is_top_move = True
+                            logger.debug(f"TOP MOVE (SAN): {move_san} matches top moves: {top_moves[:3]}")
+                            reason += " | TOP MOVE: Matches engine's first choice"
+                    except Exception as e:
+                        logger.warning(f"Error converting move to SAN: {e}")
+                
+                # If it's a top move, check for brilliant/great moves
+                if is_top_move and prev_board and curr_board and move:
                     # Check for brilliant move conditions
                     is_brilliant, brilliant_reason = MoveAnalyzer._check_brilliant_conditions(
                         prev, curr, prev_board, curr_board, move
@@ -533,7 +549,7 @@ class MoveAnalyzer:
                             return (Judgment.GREAT, reason + great_reason)
             else:
                 if move and top_moves:
-                    reason += f" | NOT TOP MOVE: Played {move.uci()}, top was {top_moves[0]}"
+                    reason += f" | NOT TOP MOVE: Played {move.uci()}, top was {top_moves[0] if top_moves else 'unknown'}"
             
             # For forced moves that aren't brilliant or great, return GOOD
             if is_forced:

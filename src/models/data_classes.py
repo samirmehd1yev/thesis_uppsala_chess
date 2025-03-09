@@ -69,10 +69,17 @@ class FeatureVector:
     middlegame_length: float = 0.0
     endgame_length: float = 0.0
     
-    # Material/Position Features
-    material_balance_changes: float = 0.0
-    piece_mobility_avg: float = 0.0
-    pawn_structure_changes: float = 0.0
+    # Material/Position Features - White
+    white_material_changes: float = 0.0
+    white_piece_mobility_avg: float = 0.0
+    white_pawn_structure_changes: float = 0.0
+    white_center_control_avg: float = 0.0
+    
+    # Material/Position Features - Black
+    black_material_changes: float = 0.0
+    black_piece_mobility_avg: float = 0.0
+    black_pawn_structure_changes: float = 0.0
+    black_center_control_avg: float = 0.0
     
     # Move Quality Features - White
     white_brilliant_count: float = 0.0  # New
@@ -97,9 +104,6 @@ class FeatureVector:
     black_eval_volatility: float = 0.0
     black_sacrifice_count: float = 0.0  # New: Count of sacrifices by Black
     black_accuracy: float = 0.0         # New: Overall accuracy for Black
-    
-    # Statistical Features
-    center_control_avg: float = 0.0
     
     # King Safety Features - New
     white_king_safety: float = 0.0      # Average king safety for White
