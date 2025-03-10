@@ -295,9 +295,13 @@ def print_feature_summary(features):
         "Game Phase": [
             "total_moves", "opening_length", "middlegame_length", "endgame_length"
         ],
-        "Material/Position": [
-            "material_balance_changes", "piece_mobility_avg", 
-            "pawn_structure_changes", "center_control_avg"
+        "Material/Position - White": [
+            "white_material_changes", "white_piece_mobility_avg", 
+            "white_pawn_structure_changes", "white_center_control_avg"
+        ],
+        "Material/Position - Black": [
+            "black_material_changes", "black_piece_mobility_avg", 
+            "black_pawn_structure_changes", "black_center_control_avg"
         ],
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
