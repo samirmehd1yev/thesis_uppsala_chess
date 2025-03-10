@@ -226,9 +226,11 @@ class MoveAnalyzer:
             # Check if played move is in top moves and is the best move
             if move_uci != top_moves[0]:
                 return False
+            # print(f"DEBUG: came here 1 {move_uci} = {top_moves} prev_eval: {prev_eval}")
             
             # If we have evaluation data, check for significant eval drop
             if prev_eval and hasattr(prev_eval, 'multipv') and prev_eval.multipv and len(prev_eval.multipv) >= 2:
+                # print(f"DEBUG: came here 2")
                 # Get evaluations for the best and second-best moves
                 best_move_data = prev_eval.multipv[0]
                 second_move_data = prev_eval.multipv[1]
@@ -254,29 +256,15 @@ class MoveAnalyzer:
                     # If position is critical (close to 0), even a smaller difference matters
                     if abs(best_eval) < 100 and abs(best_eval - second_eval) > 80:
                         return True
-                
-            # Check if it's a forced move to avoid mate
-            if len(list(prev_board.legal_moves)) > 1:  # Not the only legal move
-                # Make a copy of the board to test other moves
-                for alt_move in prev_board.legal_moves:
-                    if alt_move == move:
-                        continue
-                    
-                    # Skip if this move is in top 2 engine moves (already evaluated above)
-                    if len(top_moves) >= 2 and alt_move.uci() in top_moves[:2]:
-                        continue
-                        
-                    # Try the alternative move
-                    test_board = prev_board.copy()
-                    test_board.push(alt_move)
-                    
-                    # If this leads to a forced mate, then the original move might be the only good one
-                    if test_board.is_checkmate():
-                        return True
+            
+            # Even with top moves, we can check if they're all similar
+            if len(top_moves) >= 3:
+                # If only one of top three moves leads to clearly better position, it's the only good move
+                return False
             
             return False
         except Exception as e:
-            logger.warning(f"Error in is_only_good_move: {e}")
+            print(f"Error checking if only good move: {e}")
             return False
 
     @staticmethod
@@ -516,8 +504,13 @@ class MoveAnalyzer:
                 # Try direct UCI comparison
                 if move_uci in top_moves:
                     is_top_move = True
-                    logger.debug(f"TOP MOVE (UCI): {move_uci} matches top moves: {top_moves[:3]}")
-                    reason += " | TOP MOVE: Matches engine's first choice"
+                    if move_uci == top_moves[0]:
+                        logger.debug(f"TOP MOVE (UCI): {move_uci} matches engine's first choice: {top_moves[:3]}")
+                        reason += " | TOP MOVE: Matches engine's first choice"
+                    else:
+                        move_index = top_moves.index(move_uci) + 1  # 1-based index for display
+                        logger.debug(f"GOOD MOVE (UCI): {move_uci} found in top moves at position {move_index}: {top_moves[:3]}")
+                        reason += f" | GOOD MOVE: Within engine's top {move_index} choices"
                 # Try SAN format if we have the board
                 elif prev_board:
                     try:
@@ -525,8 +518,15 @@ class MoveAnalyzer:
                         move_san = prev_board.san(move)
                         if move_san in top_moves:
                             is_top_move = True
-                            logger.debug(f"TOP MOVE (SAN): {move_san} matches top moves: {top_moves[:3]}")
-                            reason += " | TOP MOVE: Matches engine's first choice"
+                            if move_san == top_moves[0]:
+                                logger.debug(f"TOP MOVE (SAN): {move_san} matches engine's first choice: {top_moves[:3]}")
+                                reason += " | TOP MOVE: Matches engine's first choice"
+                            else:
+                                move_index = top_moves.index(move_san) + 1  # 1-based index for display
+                                logger.debug(f"GOOD MOVE (SAN): {move_san} found in top moves at position {move_index}: {top_moves[:3]}")
+                                reason += f" | GOOD MOVE: Within engine's top {move_index} choices"
+                        else:
+                            logger.debug(f"MATCH (SAN): Move {move_san} not found in top moves: {top_moves}")
                     except Exception as e:
                         logger.warning(f"Error converting move to SAN: {e}")
                 
@@ -570,7 +570,7 @@ class MoveAnalyzer:
                 
             # Handle missing cp values
             if prev.cp is None or curr.cp is None:
-                logger.warning(f"Missing evaluation cp value(s), defaulting to GOOD: {prev.cp}, {curr.cp}")
+                # logger.warning(f"Missing evaluation cp value(s), defaulting to GOOD: {prev.cp}, {curr.cp}")
                 reason += " | GOOD: Missing evaluation data"
                 return (Judgment.GOOD, reason)
                 

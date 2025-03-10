@@ -100,6 +100,52 @@ class GameFeatureExtractor:
             logger.error(f"Error parsing top moves: {e}")
             return []
 
+    def cp_to_wdl(self, eval_dict: dict, ply: int = 30) -> dict:
+        """
+        Convert centipawn/mate evaluation to WDL (Win/Draw/Loss) probabilities
+        using chess.engine.Score's built-in WDL calculation.
+        
+        Args:
+            eval_dict: Evaluation dictionary with 'type' and 'value' keys
+            ply: Current ply (used for WDL calculation scaling)
+            
+        Returns:
+            Dictionary with 'wins', 'draws', and 'losses' probabilities (0-1 range)
+        """
+        # Import chess.engine here for Score
+        import chess.engine
+        
+        # Default result with 1.0 probability for draws
+        result = {"wins": 0.0, "draws": 1.0, "losses": 0.0}
+        
+        try:
+            # Convert our eval_dict to a chess.engine.Score object
+            score = None
+            if eval_dict.get('type') == 'mate':
+                mate_value = eval_dict.get('value', 0)
+                score = chess.engine.Mate(mate_value)
+            elif eval_dict.get('type') == 'cp':
+                cp_value = eval_dict.get('value', 0)
+                score = chess.engine.Cp(cp_value)
+            
+            if score is not None:
+                # Use the built-in WDL calculation from the chess library
+                # This is the same model Stockfish uses
+                wdl_model = "sf"  # Use Stockfish's WDL model
+                wdl = score.wdl(model=wdl_model, ply=ply)
+                
+                # The WDL values from Stockfish are in permille (0-1000)
+                # Convert to 0-1 range for better handling in sharpness calculation
+                return {
+                    "wins": wdl.wins / 1000.0,
+                    "draws": wdl.draws / 1000.0,
+                    "losses": wdl.losses / 1000.0
+                }
+        except Exception as e:
+            logger.error(f"Error calculating WDL: {e}")
+        
+        return result
+
     def create_info_objects(self, eval_list, top_moves_list):
         """
         Create Info objects from parsed evaluation and top moves lists.
@@ -128,8 +174,11 @@ class GameFeatureExtractor:
                     eval_dict = {"type": "cp", "value": 0}
                     logger.warning(f"Position {ply}: Could not parse evaluation: {eval_value}, defaulting to 0")
             
+            # Calculate WDL from evaluation
+            wdl_dict = self.cp_to_wdl(eval_dict, ply)
+            
             # Create Info object with required eval parameter
-            info = Info(ply=ply, eval=eval_dict)
+            info = Info(ply=ply, eval=eval_dict, wdl=wdl_dict)
             
             # Add top moves if available for this position
             if ply < len(top_moves_list) and top_moves_list[ply]:
@@ -137,18 +186,47 @@ class GameFeatureExtractor:
                 # Extract the move strings (first element of each pair)
                 moves = []
                 
+                # Create multipv structure for is_only_good_move function
+                multipv_data = []
+                
                 # Format of compact_top_moves: [[move1, score1], [move2, score2], [move3, score3]]
                 for move_data in top_moves:
-                    if isinstance(move_data, list) and len(move_data) >= 1:
-                        # Get just the move string (first element)
+                    if isinstance(move_data, list) and len(move_data) >= 2:
+                        # Get the move string and score
                         move_str = str(move_data[0])
+                        score_value = move_data[1]
                         moves.append(move_str)
+                        
+                        # Create score dict for multipv
+                        if isinstance(score_value, str) and score_value.startswith('#'):
+                            # Positive mate score
+                            mate_value = int(score_value[1:])
+                            score_dict = {"mate": mate_value}
+                        elif isinstance(score_value, str) and score_value.startswith('-#'):
+                            # Negative mate score
+                            mate_value = -int(score_value[2:])
+                            score_dict = {"mate": mate_value}
+                        else:
+                            # Regular centipawn evaluation
+                            try:
+                                cp_value = int(score_value) if score_value is not None else 0
+                                score_dict = {"cp": cp_value}
+                            except (ValueError, TypeError):
+                                # Default to 0 if conversion fails
+                                score_dict = {"cp": 0}
+                        
+                        # Add to multipv list
+                        multipv_data.append({"move": move_str, "score": score_dict})
                 
                 # Log the extracted top moves for debugging
                 if moves:
                     logger.debug(f"Position {ply}: Top moves: {moves}")
                 
                 info.variation = moves
+                
+                # Set multipv data if we have it
+                if multipv_data:
+                    info.multipv = multipv_data
             else:
                 logger.debug(f"Position {ply}: No top moves available")
             
@@ -426,6 +504,7 @@ class GameFeatureExtractor:
             # Extract data from row
             pgn_text = game_row.get('moves', '')
             eval_list = self.parse_eval_list(game_row.get('compact_evaluations', '[]'))
+            # logger.debug(f"DEBUG: eval_list: {eval_list}")
             top_moves_list = self.parse_top_moves(game_row.get('compact_top_moves', '[]'))
             
             # Skip games with no moves or evaluations
@@ -435,6 +514,7 @@ class GameFeatureExtractor:
             
             # Convert PGN to board positions and game object
             positions, game = self.pgn_to_board_positions(pgn_text)
+            # logger.debug(f"DEBUG: positions: {positions}")
             
             # Skip games with parsing errors
             if not positions or not game:
@@ -548,70 +628,110 @@ def main():
     output_csv = args.output
     logger.info(f"Reading input CSV from {input_csv}")
     try:
-        # Read in chunks for memory efficiency
-        chunk_size = 1 if args.test else 1000
-        chunks = pd.read_csv(input_csv, chunksize=chunk_size)
-        total_games = 0
-        processed_games = 0
-        output_exists = False
-        
-        # Get CPU count for parallel processing
-        num_processes = 1 if args.test or args.debug else min(1, multiprocessing.cpu_count() - 1)
-        logger.info(f"Using {num_processes} processes for parallel processing")
-        
-        # Columns to exclude from output
-        columns_to_exclude = [
-            'time_control', 'import_date', 'source', 'moves', 'eval_info', 
-            'clock_info', 'avg_elo', 'elo_difference', 'move_count', 
-            'has_clock_info', 'has_eval_info', 'has_analysis', 
-            'compact_evaluations', 'compact_top_moves'
-        ]
-        
-        for chunk_idx, chunk in enumerate(chunks):
-            logger.info(f"Processing chunk {chunk_idx+1} with {len(chunk)} games")
-            
-            # Process the chunk
-            if args.test or args.debug:
-                # Process just the first game directly for testing/debugging
-                first_game = chunk.iloc[0].to_dict()
-                result = extractor.process_game(first_game)
+        # For debug mode, read the entire CSV and process a specific row
+        if args.debug:
+            logger.info("Debug mode: Reading entire CSV file")
+            df = pd.read_csv(input_csv)
+            row_to_process = 22 # Default row number for debug mode
+            logger.info(f"Processing row {row_to_process} in debug mode")
+            if row_to_process < len(df):
+                game_row = df.iloc[row_to_process].to_dict()
+                result = extractor.process_game(game_row)
+                processed_games = 1 if result is not None else 0
                 processed_chunk = [result] if result is not None else []
                 
-                # Print detailed info if in debug mode
-                if args.debug and result is not None:
-                    print_game_analysis(result, first_game)
+                # Print detailed info in debug mode
+                if result is not None:
+                    print_game_analysis(result, game_row)
+                    
+                # Save to CSV
+                if processed_chunk:
+                    # Columns to exclude from output
+                    columns_to_exclude = [
+                        'time_control', 'import_date', 'source', 'moves', 'eval_info', 
+                        'clock_info', 'avg_elo', 'elo_difference', 'move_count', 
+                        'has_clock_info', 'has_eval_info', 'has_analysis', 
+                        'compact_evaluations', 'compact_top_moves'
+                    ]
+                    
+                    result_df = pd.DataFrame(processed_chunk)
+                    
+                    # Remove excluded columns if they exist
+                    columns_to_drop = [col for col in columns_to_exclude if col in result_df.columns]
+                    if columns_to_drop:
+                        result_df = result_df.drop(columns=columns_to_drop)
+                        logger.info(f"Dropped columns: {columns_to_drop}")
+                    
+                    # Save to CSV
+                    # result_df.to_csv(output_csv, mode='w', header=True, index=False)
+                    # logger.info(f"Saved debug game to CSV at {output_csv}")
             else:
-                # Process the chunk in parallel
-                processed_chunk = process_chunk(chunk, extractor, num_processes)
-            
-            total_games += len(chunk)
-            processed_games += len(processed_chunk)
-            
-            # Convert back to DataFrame
-            if processed_chunk:
-                result_df = pd.DataFrame(processed_chunk)
+                logger.error(f"Row {row_to_process} does not exist in the CSV. CSV has {len(df)} rows.")
+                return
                 
-                # Remove excluded columns if they exist
-                columns_to_drop = [col for col in columns_to_exclude if col in result_df.columns]
-                if columns_to_drop:
-                    result_df = result_df.drop(columns=columns_to_drop)
-                    logger.info(f"Dropped columns: {columns_to_drop}")
-                
-                # Save to CSV (append mode after first chunk)
-                mode = 'a' if output_exists else 'w'
-                header = not output_exists
-                result_df.to_csv(output_csv, mode=mode, header=header, index=False)
-                output_exists = True
-                
-                logger.info(f"Saved {len(processed_chunk)} games to CSV")
+            # Set total for debug mode
+            total_games = 1
+        else:
+            # Read in chunks for memory efficiency
+            chunk_size = 1 if args.test else 1000
+            chunks = pd.read_csv(input_csv, chunksize=chunk_size)
+            total_games = 0
+            processed_games = 0
+            output_exists = False
             
-            # Log progress
-            logger.info(f"Processed {processed_games}/{total_games} games so far")
+            # Get CPU count for parallel processing
+            num_processes = 1 if args.test else max(1, multiprocessing.cpu_count() - 1)
+            logger.info(f"Using {num_processes} processes for parallel processing")
             
-            # Exit after first chunk if in test mode
-            if args.test:
-                logger.info("Test mode: exiting after processing first game")
-                break
+            # Columns to exclude from output
+            columns_to_exclude = [
+                'time_control', 'import_date', 'source', 'moves', 'eval_info', 
+                'clock_info', 'avg_elo', 'elo_difference', 'move_count', 
+                'has_clock_info', 'has_eval_info', 'has_analysis', 
+                'compact_evaluations', 'compact_top_moves'
+            ]
+            
+            for chunk_idx, chunk in enumerate(chunks):
+                logger.info(f"Processing chunk {chunk_idx+1} with {len(chunk)} games")
+                
+                # Process the chunk
+                if args.test:
+                    # Process just the first game directly for testing
+                    first_game = chunk.iloc[0].to_dict()
+                    result = extractor.process_game(first_game)
+                    processed_chunk = [result] if result is not None else []
+                else:
+                    # Process the chunk in parallel
+                    processed_chunk = process_chunk(chunk, extractor, num_processes)
+                
+                total_games += len(chunk)
+                processed_games += len(processed_chunk)
+                
+                # Convert back to DataFrame
+                if processed_chunk:
+                    result_df = pd.DataFrame(processed_chunk)
+                    
+                    # Remove excluded columns if they exist
+                    columns_to_drop = [col for col in columns_to_exclude if col in result_df.columns]
+                    if columns_to_drop:
+                        result_df = result_df.drop(columns=columns_to_drop)
+                        logger.info(f"Dropped columns: {columns_to_drop}")
+                    
+                    # Save to CSV (append mode after first chunk)
+                    mode = 'a' if output_exists else 'w'
+                    header = not output_exists
+                    result_df.to_csv(output_csv, mode=mode, header=header, index=False)
+                    output_exists = True
+                    
+                    logger.info(f"Saved {len(processed_chunk)} games to CSV")
+                
+                # Log progress
+                logger.info(f"Processed {processed_games}/{total_games} games so far")
+                
+                # Exit after first chunk if in test mode
+                if args.test:
+                    logger.info("Test mode: exiting after processing first game")
+                    break
         
         end_time = datetime.now()
         processing_time = end_time - start_time
