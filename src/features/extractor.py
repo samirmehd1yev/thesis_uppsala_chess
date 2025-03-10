@@ -70,6 +70,17 @@ class FeatureExtractor:
         features.white_vulnerability_spikes = king_safety_metrics['white']['vulnerability_spikes']
         features.black_vulnerability_spikes = king_safety_metrics['black']['vulnerability_spikes']
         
+        # Move statistics
+        # Convert mainline_moves to a list before passing to _calculate_move_statistics
+        moves_list = list(game.mainline_moves())
+        capture_frequency_white, capture_frequency_black, check_frequency_white, check_frequency_black, castle_move_white, castle_move_black = self._calculate_move_statistics(positions, moves_list)
+        features.capture_frequency_white = capture_frequency_white
+        features.capture_frequency_black = capture_frequency_black
+        features.check_frequency_white = check_frequency_white
+        features.check_frequency_black = check_frequency_black
+        features.castle_move_white = castle_move_white
+        features.castle_move_black = castle_move_black
+        
         # Calculate quality metrics if evaluations available
         if evals and len(evals) > 1:
             # Get the actual moves played
@@ -545,6 +556,96 @@ class FeatureExtractor:
             features.black_avg_eval_change = float(np.mean(np.abs(black_eval_changes)))
             features.black_eval_volatility = float(np.std(black_eval_changes))
 
+    def _calculate_move_statistics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float, int, int]:
+        """
+        Calculate move-related statistics including capture frequency, check frequency,
+        and castle timing for both players separately.
+        
+        Args:
+            positions: List of board positions (positions[i] is the board before moves[i])
+            moves: List of moves played
+            
+        Returns:
+            Tuple of (capture_frequency_white, capture_frequency_black, 
+                    check_frequency_white, check_frequency_black, 
+                    castle_move_white, castle_move_black)
+        """
+        if not positions or not moves:
+            return 0.0, 0.0, 0.0, 0.0, 0, 0
+        
+        # Convert moves to a list if it's not already one
+        if not isinstance(moves, list):
+            moves = list(moves)
+                
+        total_white_moves = 0
+        total_black_moves = 0
+        white_capture_count = 0
+        black_capture_count = 0
+        white_check_count = 0
+        black_check_count = 0
+        white_castle_move = 0  # Changed to 0 for never castled
+        black_castle_move = 0  # Changed to 0 for never castled
+        
+        for i, move in enumerate(moves):
+            if i >= len(positions):
+                break
+                    
+            board = positions[i]
+            is_white = board.turn == chess.WHITE
+            
+            # Count total moves by color
+            if is_white:
+                total_white_moves += 1
+            else:
+                total_black_moves += 1
+                
+            # Check for captures (including en passant)
+            is_capture = board.piece_at(move.to_square) is not None
+            is_en_passant = False
+            
+            # Check for en passant if it's a pawn move
+            if board.piece_type_at(move.from_square) == chess.PAWN:
+                if board.ep_square == move.to_square:
+                    is_en_passant = True
+            
+            if is_capture or is_en_passant:
+                if is_white:
+                    white_capture_count += 1
+                else:
+                    black_capture_count += 1
+            
+            # Check for castling
+            if board.piece_type_at(move.from_square) == chess.KING:
+                # Check if it's a castling move (king moves two squares)
+                file_diff = abs(chess.square_file(move.from_square) - chess.square_file(move.to_square))
+                if file_diff > 1:  # King moved more than one file, must be castling
+                    move_number = (i // 2) + 1  # Convert to move number (1-based)
+                    if is_white:
+                        white_castle_move = move_number
+                    else:
+                        black_castle_move = move_number
+            
+            # Make a copy of the board and apply the move to check for check
+            next_board = board.copy()
+            next_board.push(move)
+            
+            if next_board.is_check():
+                if is_white:
+                    white_check_count += 1
+                else:
+                    black_check_count += 1
+        
+        # Calculate frequencies
+        capture_frequency_white = white_capture_count / total_white_moves if total_white_moves > 0 else 0.0
+        capture_frequency_black = black_capture_count / total_black_moves if total_black_moves > 0 else 0.0
+        check_frequency_white = white_check_count / total_white_moves if total_white_moves > 0 else 0.0
+        check_frequency_black = black_check_count / total_black_moves if total_black_moves > 0 else 0.0
+        
+        # Return actual move numbers for castling (not normalized)
+        return (capture_frequency_white, capture_frequency_black, 
+                check_frequency_white, check_frequency_black, 
+                white_castle_move, black_castle_move)
+    
     def count_sacrifices(self, positions: List[chess.Board], moves: List[chess.Move], features: FeatureVector) -> None:
         """
         Count sacrifices for both players
@@ -554,6 +655,10 @@ class FeatureExtractor:
             moves: List of moves played
             features: FeatureVector object to update
         """
+        # Convert moves to a list if it's not already one
+        if not isinstance(moves, list):
+            moves = list(moves)
+            
         white_sacrifices = 0
         black_sacrifices = 0
         

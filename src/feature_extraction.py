@@ -565,6 +565,10 @@ class GameFeatureExtractor:
             # Calculate overall player accuracies
             white_accuracy, black_accuracy = self.calculate_player_accuracies(move_accuracies, positions)
             
+            # Calculate move statistics
+            capture_freq_white, capture_freq_black, check_freq_white, check_freq_black, castle_move_white, castle_move_black = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
+            
+            
             # Update accuracy values in features
             features.white_accuracy = white_accuracy
             features.black_accuracy = black_accuracy
@@ -578,6 +582,14 @@ class GameFeatureExtractor:
             result['overall_sharpness'] = cumulative_sharpness['sharpness']
             result['white_sharpness'] = cumulative_sharpness['white_sharpness']
             result['black_sharpness'] = cumulative_sharpness['black_sharpness']
+            
+            # Add move statistics
+            result['capture_frequency_white'] = capture_freq_white
+            result['capture_frequency_black'] = capture_freq_black
+            result['check_frequency_white'] = check_freq_white
+            result['check_frequency_black'] = check_freq_black
+            result['castle_move_white'] = castle_move_white
+            result['castle_move_black'] = castle_move_black
             
             return result
         
@@ -648,7 +660,7 @@ def main():
                 if processed_chunk:
                     # Columns to exclude from output
                     columns_to_exclude = [
-                        'time_control', 'import_date', 'source', 'moves', 'eval_info', 
+                        'time_control', 'import_date', 'source', 'eval_info', 
                         'clock_info', 'avg_elo', 'elo_difference', 'move_count', 
                         'has_clock_info', 'has_eval_info', 'has_analysis', 
                         'compact_evaluations', 'compact_top_moves'
@@ -663,8 +675,8 @@ def main():
                         logger.info(f"Dropped columns: {columns_to_drop}")
                     
                     # Save to CSV
-                    # result_df.to_csv(output_csv, mode='w', header=True, index=False)
-                    # logger.info(f"Saved debug game to CSV at {output_csv}")
+                    result_df.to_csv(output_csv, mode='w', header=True, index=False)
+                    logger.info(f"Saved debug game to CSV at {output_csv}")
             else:
                 logger.error(f"Row {row_to_process} does not exist in the CSV. CSV has {len(df)} rows.")
                 return
@@ -787,6 +799,10 @@ def print_game_analysis(result, game_data):
             'white_sharpness': result['white_sharpness'],
             'black_sharpness': result['black_sharpness']
         })
+    
+    # Print move statistics if available
+    if 'capture_frequency_white' in result or 'capture_frequency_black' in result:
+        print_move_statistics(result)
     
     print("\n" + "="*80)
 
@@ -993,5 +1009,57 @@ def print_sharpness_summary(cumulative_sharpness):
     print(f"  White Sharpness: {sharpness_color(white)}{white:.1f}{Style.RESET_ALL}")
     print(f"  Black Sharpness: {sharpness_color(black)}{black:.1f}{Style.RESET_ALL}")
 
+# Add a new function to print move statistics
+def print_move_statistics(result):
+    """Print move statistics like captures, checks, and castling"""
+    try:
+        from colorama import Fore, Back, Style, init
+        init()
+    except ImportError:
+        class DummyFore:
+            def __getattr__(self, name):
+                return ""
+        class DummyStyle:
+            def __getattr__(self, name):
+                return ""
+        Fore = DummyFore()
+        Style = DummyStyle()
+    
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}MOVE STATISTICS{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Print capture frequency for white and black
+    if 'capture_frequency_white' in result:
+        capture_freq_white = result['capture_frequency_white']
+        print(f"  White Capture Frequency: {capture_freq_white:.2f}")
+    
+    if 'capture_frequency_black' in result:
+        capture_freq_black = result['capture_frequency_black']
+        print(f"  Black Capture Frequency: {capture_freq_black:.2f}")
+    
+    # Print check frequency for white and black
+    if 'check_frequency_white' in result:
+        check_freq_white = result['check_frequency_white']
+        print(f"  White Check Frequency: {check_freq_white:.2f}")
+    
+    if 'check_frequency_black' in result:
+        check_freq_black = result['check_frequency_black']
+        print(f"  Black Check Frequency: {check_freq_black:.2f}")
+    
+    # Print castling timing using actual move numbers
+    if 'castle_move_white' in result:
+        castle_white = result['castle_move_white']
+        if castle_white > 0:
+            print(f"  White Castling: Move {castle_white}")
+        else:
+            print(f"  White Castling: Did not castle")
+    
+    if 'castle_move_black' in result:
+        castle_black = result['castle_move_black']
+        if castle_black > 0:
+            print(f"  Black Castling: Move {castle_black}")
+        else:
+            print(f"  Black Castling: Did not castle")
 if __name__ == "__main__":
     main()

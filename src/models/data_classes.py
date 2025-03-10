@@ -113,5 +113,14 @@ class FeatureVector:
     white_vulnerability_spikes: float = 0.0  # Number of sudden safety drops for White
     black_vulnerability_spikes: float = 0.0  # Number of sudden safety drops for Black
     
+    
+    # Move Statistics
+    capture_frequency_white: float = 0.0  # Ratio of captures to total white moves
+    capture_frequency_black: float = 0.0  # Ratio of captures to total black moves
+    check_frequency_white: float = 0.0    # Ratio of checks to total white moves
+    check_frequency_black: float = 0.0    # Ratio of checks to total black moves
+    castle_move_white: int = 0           # Move number when White castled (0 if never castled)
+    castle_move_black: int = 0           # Move number when Black castled (0 if never castled)
+    
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)
