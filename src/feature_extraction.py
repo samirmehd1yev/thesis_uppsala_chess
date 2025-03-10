@@ -218,9 +218,9 @@ class GameFeatureExtractor:
                         # Add to multipv list
                         multipv_data.append({"move": move_str, "score": score_dict})
                 
-                # Log the extracted top moves for debugging
-                if moves:
-                    logger.debug(f"Position {ply}: Top moves: {moves}")
+                # # Log the extracted top moves for debugging
+                # if moves:
+                #     logger.debug(f"Position {ply}: Top moves: {moves}")
                 
                 info.variation = moves
                 
@@ -644,7 +644,7 @@ def main():
         if args.debug:
             logger.info("Debug mode: Reading entire CSV file")
             df = pd.read_csv(input_csv)
-            row_to_process = 22 # Default row number for debug mode
+            row_to_process = 0 # Default row number for debug mode
             logger.info(f"Processing row {row_to_process} in debug mode")
             if row_to_process < len(df):
                 game_row = df.iloc[row_to_process].to_dict()
@@ -785,14 +785,7 @@ def print_game_analysis(result, game_data):
         if key in game_data:
             print(f"  {key.title()}: {game_data[key]}")
     
-    # Print feature summary
-    print_feature_summary(result)
-    
-    # Print judgment summary if available
-    if 'white_brilliant_count' in result:
-        print_judgment_summary(result)
-    
-    # Print sharpness summary if available
+    # Print sharpness summary if available (moved to top)
     if 'overall_sharpness' in result and 'white_sharpness' in result and 'black_sharpness' in result:
         print_sharpness_summary({
             'sharpness': result['overall_sharpness'],
@@ -800,11 +793,16 @@ def print_game_analysis(result, game_data):
             'black_sharpness': result['black_sharpness']
         })
     
-    # Print move statistics if available
+    # Print move statistics if available (moved to top)
     if 'capture_frequency_white' in result or 'capture_frequency_black' in result:
         print_move_statistics(result)
     
-    print("\n" + "="*80)
+    # Print feature summary
+    print_feature_summary(result)
+    
+    # Print judgment summary if available
+    if 'white_brilliant_count' in result:
+        print_judgment_summary(result)
 
 def print_feature_summary(features):
     """Print the feature summary with formatting"""
@@ -830,13 +828,44 @@ def print_feature_summary(features):
         "Game Phase": [
             "total_moves", "opening_length", "middlegame_length", "endgame_length"
         ],
-        "Material/Position - White": [
-            "white_material_changes", "white_piece_mobility_avg", 
-            "white_pawn_structure_changes", "white_center_control_avg"
+        "Development - White": [
+            "minor_piece_development_white", "queen_development_white"
         ],
-        "Material/Position - Black": [
-            "black_material_changes", "black_piece_mobility_avg", 
-            "black_pawn_structure_changes", "black_center_control_avg"
+        "Development - Black": [
+            "minor_piece_development_black", "queen_development_black"
+        ],
+        "Engine Alignment - White": [
+            "top_move_alignment_white", "top2_3_move_alignment_white"
+        ],
+        "Engine Alignment - Black": [
+            "top_move_alignment_black", "top2_3_move_alignment_black"
+        ],
+        "Material Features - White": [
+            "white_material_changes", "material_volatility_white", 
+            "piece_exchange_rate_white", "pawn_exchange_rate_white"
+        ],
+        "Material Features - Black": [
+            "black_material_changes", "material_volatility_black",
+            "piece_exchange_rate_black", "pawn_exchange_rate_black"
+        ],
+        "Material Balance": [
+            "material_balance_std"
+        ],
+        "Position Control - White": [
+            "white_piece_mobility_avg", "white_center_control_avg",
+            "space_advantage_white", "pawn_control_white",
+            "white_pawn_structure_changes"
+        ],
+        "Position Control - Black": [
+            "black_piece_mobility_avg", "black_center_control_avg",
+            "space_advantage_black", "pawn_control_black",
+            "black_pawn_structure_changes"
+        ],
+        "King Safety - White": [
+            "white_king_safety", "white_king_safety_min", "white_vulnerability_spikes"
+        ],
+        "King Safety - Black": [
+            "black_king_safety", "black_king_safety_min", "black_vulnerability_spikes"
         ],
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
@@ -849,6 +878,12 @@ def print_feature_summary(features):
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
             "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
             "black_accuracy"
+        ],
+        "Move Statistics - White": [
+            "capture_frequency_white", "check_frequency_white", "castle_move_white"
+        ],
+        "Move Statistics - Black": [
+            "capture_frequency_black", "check_frequency_black", "castle_move_black"
         ]
     }
     
@@ -1061,5 +1096,6 @@ def print_move_statistics(result):
             print(f"  Black Castling: Move {castle_black}")
         else:
             print(f"  Black Castling: Did not castle")
+
 if __name__ == "__main__":
     main()
