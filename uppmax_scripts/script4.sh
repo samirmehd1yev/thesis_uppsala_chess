@@ -2,7 +2,7 @@
 #SBATCH -A uppmax2025-2-265
 #SBATCH -p node
 #SBATCH -n 20
-#SBATCH -t 06:00:00
+#SBATCH -t 12:00:00
 #SBATCH -J chess_eval
 #SBATCH --output=logs/chess_eval_%j.log
 #SBATCH --error=logs/chess_eval_%j.err

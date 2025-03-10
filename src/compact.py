@@ -84,7 +84,7 @@ def compact_chess_data(input_path, output_path):
                             for pos_moves in top_moves:
                                 pos_data = []
                                 for move_data in pos_moves:
-                                    move = move_data.get('move', {}).get('san', '')
+                                    move = move_data.get('move', {}).get('uci', '')
                                     score = move_data.get('score', {})
                                     
                                     if score.get('type') == 'cp':

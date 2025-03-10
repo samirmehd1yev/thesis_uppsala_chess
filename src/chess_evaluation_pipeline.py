@@ -110,10 +110,6 @@ class ChessGameAnalyzer:
                 logger.warning(f"Failed to parse game: {pgn_text[:100]}...")
                 return [], []
                 
-            # Get game metadata for logging
-            white = game.headers.get("White", "Unknown")
-            black = game.headers.get("Black", "Unknown")
-            date = game.headers.get("Date", "????")
             
             # Get total moves for progress tracking
             move_count = 0
@@ -388,7 +384,11 @@ def process_chunk(chunk_df, analyzer_settings, progress_callback=None):
         # Process results as they complete
         for future in as_completed(futures):
             try:
-                result = future.result()
+                result = future.result(timeout=900)
+                if result is None:
+                    logger.warning("Game analysis timed out")
+                    pbar.update(1)
+                    continue
                 idx = result["idx"]
                 results[idx] = {
                     'evaluations': result["evaluations"],
@@ -490,7 +490,20 @@ def main():
     if args.resume and os.path.exists(args.output):
         logger.info(f"Resuming from existing output: {args.output}")
         try:
-            df_output = pd.read_csv(args.output)
+            # Use error_bad_lines=False (for pandas <1.3) or on_bad_lines='skip' (pandas >=1.3)
+            try:
+                # For newer pandas versions
+                df_output = pd.read_csv(args.output, on_bad_lines='skip')
+                logger.warning("Using 'on_bad_lines=skip' to handle corrupted rows")
+            except Exception as e:
+                logger.error(f"Error reading output file for resuming: {e}")
+                sys.exit(1)
+            
+            # Count the difference between expected rows and actual rows
+            file_size = sum(1 for _ in open(args.output)) - 1  # -1 for header
+            skipped_rows = file_size - len(df_output)
+            if skipped_rows > 0:
+                logger.warning(f"Skipped {skipped_rows} corrupted rows when reading the output file")
             
             # Identify which games have already been processed
             for i, row in df_output.iterrows():
@@ -508,6 +521,8 @@ def main():
             logger.info(f"Found {len(processed_games)} already processed games")
         except Exception as e:
             logger.error(f"Error reading output file for resuming: {e}")
+            logger.warning("Will start processing from the beginning")
+            processed_games = set()  # Reset to empty set if we can't read the file at all
     
     # Filter out already processed games if resuming
     if processed_games:
