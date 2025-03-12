@@ -83,10 +83,8 @@ class FeatureExtractor:
             features.top2_3_move_alignment_black = top2_3_move_alignment_black
         
         # Calculate material features - new addition
-        material_volatility_white, material_volatility_black, material_balance_std, \
-        piece_exchange_rate_white, piece_exchange_rate_black, \
-        pawn_exchange_rate_white, pawn_exchange_rate_black = self._calculate_material_features(positions)
-        
+        material_volatility_white, material_volatility_black, material_balance_std, piece_exchange_rate_white, piece_exchange_rate_black, pawn_exchange_rate_white, pawn_exchange_rate_black = self._calculate_material_features(positions)
+        # print(f"Material volatility white: {material_volatility_white}, Material volatility black: {material_volatility_black}, Material balance std: {material_balance_std}, Piece exchange rate white: {piece_exchange_rate_white}, Piece exchange rate black: {piece_exchange_rate_black}, Pawn exchange rate white: {pawn_exchange_rate_white}, Pawn exchange rate black: {pawn_exchange_rate_black}")
         features.material_volatility_white = material_volatility_white
         features.material_volatility_black = material_volatility_black
         features.material_balance_std = material_balance_std
@@ -135,6 +133,7 @@ class FeatureExtractor:
             
             # Use pre-calculated judgments if provided
             if judgments and len(judgments) > 0:
+                # print("CAMEEEEEE TO COUNT JUDGMENTS")
                 self._count_judgment_metrics(judgments, features)
                 # Still count sacrifices if we have positions and moves
                 if positions and moves:
@@ -142,7 +141,9 @@ class FeatureExtractor:
             else:
                 # Otherwise calculate move qualities with board information for brilliant/great detection
                 self._calculate_quality_metrics(evals, features, positions, moves)
-        
+                # print("CAMEEEEEE TO COUNT QUALITY METRICS")
+
+            self._calculate_eval_changes(evals, features, moves)
             # Normalize move quality counts by total moves
             if total_moves > 0:
                 features.white_brilliant_count /= total_moves
@@ -615,8 +616,13 @@ class FeatureExtractor:
             prev_black_material = black_material_values[i-1]
             curr_black_material = black_material_values[i]
             
+            # Calculate material changes for each player (regardless of whose turn it is)
             white_material_change = abs(curr_white_material - prev_white_material)
             black_material_change = abs(curr_black_material - prev_black_material)
+            
+            # Always track material changes for both players
+            white_material_changes.append(white_material_change)
+            black_material_changes.append(black_material_change)
             
             # Log material changes for debugging
             if white_material_change > 0 or black_material_change > 0:
@@ -629,7 +635,6 @@ class FeatureExtractor:
             
             if is_white_move:
                 white_move_count += 1
-                white_material_changes.append(white_material_change)  # Always append, even if 0
                 
                 # Check for captures by White (Black lost material)
                 if curr_black_material < prev_black_material:
@@ -651,9 +656,9 @@ class FeatureExtractor:
                     if black_pawns_before > black_pawns_after:
                         white_pawn_exchanges += 1
                         logging.debug(f"Move {i//2 + 1}: White captured Black pawn")
-                    else:
-                        black_move_count += 1
-                        black_material_changes.append(black_material_change)  # Always append, even if 0
+            else:
+                # Black's move
+                black_move_count += 1
                 
                 # Check for captures by Black (White lost material)
                 if curr_white_material < prev_white_material:
@@ -1082,6 +1087,48 @@ class FeatureExtractor:
             top2_3_move_alignment_white, top2_3_move_alignment_black
         )
         
+    def _calculate_eval_changes(self, evals: List[Info], features: FeatureVector, moves: List[chess.Move]) -> None:
+        """Calculate evaluation changes for both players"""
+        white_eval_changes = []
+        black_eval_changes = []
+        
+        # Skip first evaluation as we need pairs
+        for i in range(1, len(evals)):
+            if i-1 >= len(moves):
+                break
+                
+            prev, curr = evals[i-1], evals[i]
+            is_white = (i - 1) % 2 == 0  # Even indices are White's moves
+            
+            # Handle both CP and mate scores
+            if prev.cp is not None and curr.cp is not None:
+                # Both positions have CP scores
+                eval_change = curr.cp - prev.cp
+            elif prev.mate is not None or curr.mate is not None:
+                # At least one position has a mate score - convert to CP
+                prev_cp = 10000 if prev.mate and prev.mate > 0 else -10000 if prev.mate else (prev.cp or 0)
+                curr_cp = 10000 if curr.mate and curr.mate > 0 else -10000 if curr.mate else (curr.cp or 0)
+                eval_change = curr_cp - prev_cp
+            else:
+                # Skip if no score available
+                continue
+                
+            # For Black's moves, negate the change to get their perspective
+            if not is_white:
+                eval_change = -eval_change
+                black_eval_changes.append(eval_change)
+            else:
+                white_eval_changes.append(eval_change)
+        
+        # Calculate evaluation metrics
+        if white_eval_changes:
+            features.white_avg_eval_change = float(np.mean(np.abs(white_eval_changes)))
+            features.white_eval_volatility = float(np.std(white_eval_changes))
+        
+        if black_eval_changes:
+            features.black_avg_eval_change = float(np.mean(np.abs(black_eval_changes)))
+            features.black_eval_volatility = float(np.std(black_eval_changes))
+    
     def _calculate_quality_metrics(self, evals: List[Info], features: FeatureVector, 
                                   positions: List[chess.Board] = None, 
                                   moves: List[chess.Move] = None) -> None:
@@ -1103,10 +1150,6 @@ class FeatureExtractor:
         # Initialize sacrifice counters
         white_sacrifices = 0
         black_sacrifices = 0
-        
-        # Track evaluation changes
-        white_eval_changes = []
-        black_eval_changes = []
         
         # Skip first evaluation as we need pairs to analyze moves
         for i in range(1, len(evals)):
@@ -1145,16 +1188,6 @@ class FeatureExtractor:
             else:
                 black_counts[judgment] += 1
             
-            # Track eval changes
-            if prev.cp is not None and curr.cp is not None:
-                # Get raw eval change from current player's perspective
-                eval_change = curr.cp - prev.cp
-                # For Black's moves, negate the change to get their perspective
-                if not is_white:
-                    eval_change = -eval_change
-                    black_eval_changes.append(eval_change)
-                else:
-                    white_eval_changes.append(eval_change)
         
         # Set judgment counts
         features.white_brilliant_count = white_counts[Judgment.BRILLIANT]
@@ -1172,15 +1205,6 @@ class FeatureExtractor:
         features.black_mistake_count = black_counts[Judgment.MISTAKE]
         features.black_blunder_count = black_counts[Judgment.BLUNDER]
         features.black_sacrifice_count = black_sacrifices
-        
-        # Calculate eval metrics
-        if white_eval_changes:
-            features.white_avg_eval_change = float(np.mean(np.abs(white_eval_changes)))
-            features.white_eval_volatility = float(np.std(white_eval_changes))
-        
-        if black_eval_changes:
-            features.black_avg_eval_change = float(np.mean(np.abs(black_eval_changes)))
-            features.black_eval_volatility = float(np.std(black_eval_changes))
 
     def _calculate_move_statistics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float, int, int]:
         """
