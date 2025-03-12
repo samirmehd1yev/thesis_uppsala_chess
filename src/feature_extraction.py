@@ -35,6 +35,7 @@ from analysis.phase_detector import GamePhaseDetector
 from analysis.king_safety import KingSafetyEvaluator
 from analysis.move_analyzer import MoveAnalyzer
 from analysis.sharpness_analyzer import WdlSharpnessAnalyzer
+from tools.eco_database_loader import eco_loader
 
 # Configure logging
 logging.basicConfig(
@@ -57,6 +58,8 @@ class GameFeatureExtractor:
     def __init__(self):
         self.feature_extractor = FeatureExtractor()
         self.sharpness_analyzer = WdlSharpnessAnalyzer()
+        # Load ECO database for opening identification
+        self.eco_loader = eco_loader  # Use the singleton instance
     
     def parse_eval_list(self, eval_str):
         """
@@ -345,96 +348,47 @@ class GameFeatureExtractor:
             
         return move_accuracies
 
-    def calculate_player_accuracies(self, move_accuracies, positions):
+    def calculate_player_accuracies(self, move_accuracies, positions, features=None):
         """
         Calculate overall accuracy for white and black players using Lichess approach.
-        Mirrors GameAnalyzer._calculate_player_accuracies
+        Uses the implementation from GameAnalyzer._calculate_player_accuracies
+        for consistency and to avoid code duplication.
+        
+        Args:
+            move_accuracies: List of dictionaries containing move accuracy information
+            positions: List of chess board positions
+            features: Optional FeatureVector with phase information
+            
+        Returns:
+            Tuple of (white_accuracy, black_accuracy, phase_accuracies)
         """
-        if not move_accuracies:
-            return 0.0, 0.0
+        # Import GameAnalyzer dynamically to avoid circular imports
+        from analysis.game_analyzer import GameAnalyzer
+        
+        # Extract phase boundaries from features if available
+        phase_info = None
+        if features is not None and hasattr(features, 'opening_length') and hasattr(features, 'middlegame_length'):
+            # Convert normalized phase lengths to actual move numbers
+            total_moves = int(features.total_moves)
+            opening_end = max(1, int(features.opening_length * total_moves))
+            middlegame_end = min(total_moves, int((features.opening_length + features.middlegame_length) * total_moves))
             
-        # Get all win percentages for volatility calculation
-        all_win_percents = []
-        
-        # Add the initial position (like Lichess's Cp.initial)
-        all_win_percents.append(0.5)  # 50% win chance for starting position
-        
-        # Add all win percentages from moves
-        for acc in move_accuracies:
-            if "win_percent_before" in acc and acc["win_percent_before"] is not None:
-                all_win_percents.append(acc["win_percent_before"] / 100.0)  # Convert to 0-1 range
-            if "win_percent_after" in acc and acc["win_percent_after"] is not None:
-                all_win_percents.append(acc["win_percent_after"] / 100.0)  # Convert to 0-1 range
-                
-        # Calculate window size based on game length (like Lichess)
-        window_size = min(max(2, len(positions) // 10), 8)  # Between 2 and 8 positions
-        
-        # Create windows for volatility calculation
-        windows = []
-        
-        # First add window_size - 2 copies of the first window
-        first_window = all_win_percents[:window_size]
-        for _ in range(min(window_size - 2, len(first_window) - 2)):
-            windows.append(first_window)
+            phase_info = {
+                'opening_end': opening_end,
+                'middlegame_end': middlegame_end
+            }
             
-        # Then add all sliding windows
-        for i in range(len(all_win_percents) - window_size + 1):
-            windows.append(all_win_percents[i:i+window_size])
-            
-        # Calculate standard deviation for each window (volatility/complexity weight)
-        weights = []
-        for window in windows:
-            if len(window) >= 2:
-                # Calculate standard deviation (Lichess's Maths.standardDeviation)
-                mean = sum(window) / len(window)
-                variance = sum((x - mean) ** 2 for x in window) / len(window)
-                stdev = math.sqrt(variance)
-                # Clamp between 0.5 and 12 (like Lichess)
-                weight = max(0.5, min(12, stdev))
-                weights.append(weight)
-            else:
-                weights.append(0.5)  # Default minimum weight
-                
-        # Pair moves with weights (similar to Lichess's zip(allWinPercents.sliding(2), weights))
-        weighted_accuracies_by_color = {"white": [], "black": []}
+            logger.debug(f"Using actual phase detection: opening_end={opening_end}, middlegame_end={middlegame_end}")
         
-        for i, acc in enumerate(move_accuracies):
-            if i < len(weights):
-                weight = weights[i]
-                color = acc["player"]
-                accuracy = acc["accuracy"]
-                weighted_accuracies_by_color[color].append((accuracy, weight))
-                
-        def weighted_mean(weighted_values):
-            """Calculate weighted mean like Lichess's Maths.weightedMean"""
-            if not weighted_values:
-                return 0.0
-            total_weight = sum(weight for _, weight in weighted_values)
-            if total_weight == 0:
-                return 0.0
-            return sum(value * weight for value, weight in weighted_values) / total_weight
-            
-        def harmonic_mean(values):
-            """Calculate harmonic mean like Lichess's Maths.harmonicMean"""
-            if not values:
-                return 0.0
-            # Filter out zeros to avoid division by zero
-            non_zero_values = [v for v in values if v > 0]
-            if not non_zero_values:
-                return 0.0
-            return len(non_zero_values) / sum(1.0 / v for v in non_zero_values)
-            
-        # Calculate white accuracy (exactly like Lichess)
-        white_weighted = weighted_mean(weighted_accuracies_by_color["white"])
-        white_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["white"]])
-        white_accuracy = (white_weighted + white_harmonic) / 2
+        # Use the implementation from GameAnalyzer
+        white_accuracy, black_accuracy, phase_accuracies = GameAnalyzer._calculate_player_accuracies(
+            None,  # self is None since we're calling a class method
+            move_accuracies, 
+            positions,
+            phase_info
+        )
         
-        # Calculate black accuracy (exactly like Lichess)
-        black_weighted = weighted_mean(weighted_accuracies_by_color["black"])
-        black_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["black"]])
-        black_accuracy = (black_weighted + black_harmonic) / 2
-        
-        return white_accuracy, black_accuracy
+        return white_accuracy, black_accuracy, phase_accuracies
 
     def analyze_move(self, prev_info, curr_info, prev_board, curr_board, move, top_moves):
         """
@@ -496,6 +450,63 @@ class GameFeatureExtractor:
         
         return is_match
 
+    def calculate_opening_novelty_score(self, game, features, eco_code=None):
+        """
+        Calculate the opening novelty score based on how early the game deviates from known theory.
+        
+        The score is calculated as: (number of moves matching ECO lines) / (total opening moves)
+        This represents how long the players stayed in "book" during the opening phase.
+        
+        Args:
+            game: The chess.pgn.Game object
+            features: The FeatureVector with opening_length already calculated
+            eco_code: The ECO code from the CSV data, if available
+            
+        Returns:
+            float: The opening novelty score (0.0 to 1.0), eco_code, and opening_name
+        """
+        try:
+            # Calculate total moves in opening phase
+            total_moves = features.total_moves
+            opening_length = features.opening_length
+            total_opening_moves = int(opening_length * total_moves)
+            
+            if total_opening_moves <= 0:
+                return 0.0, "", "", 0
+                
+            # Convert game moves to UCI format for comparison
+            game_moves_uci = []
+            board = chess.Board()
+            current_node = game
+            
+            while not current_node.is_end():
+                next_node = current_node.variations[0]
+                move = next_node.move
+                game_moves_uci.append(move.uci())
+                board.push(move)
+                current_node = next_node
+            
+            # If we have an ECO code from the CSV, use it instead of finding a match
+            if eco_code:
+                # Use the FeatureExtractor's calculate_opening_novelty_score method
+                opening_novelty_score, opening_name, matched_eco, matching_plies = self.feature_extractor.calculate_opening_novelty_score(
+                    eco_code, game_moves_uci, opening_length, total_moves
+                )
+                
+                logger.debug(f"Using ECO code from CSV: {eco_code}")
+                logger.debug(f"Matched ECO code: {matched_eco}")
+                logger.debug(f"Opening name: {opening_name}")
+                logger.debug(f"Opening novelty score: {opening_novelty_score:.2f}")
+                logger.debug(f"Matching plies: {matching_plies}")
+                
+                return opening_novelty_score, matched_eco, opening_name, matching_plies
+            
+            return 0.0, "Unknown", "Unknown Opening", 0
+            
+        except Exception as e:
+            logger.error(f"Error calculating opening novelty score: {e}")
+            return 0.0, "", "Unknown Opening", 0
+
     def process_game(self, game_row):
         """
         Process a single game and extract features.
@@ -504,7 +515,6 @@ class GameFeatureExtractor:
             # Extract data from row
             pgn_text = game_row.get('moves', '')
             eval_list = self.parse_eval_list(game_row.get('compact_evaluations', '[]'))
-            # logger.debug(f"DEBUG: eval_list: {eval_list}")
             top_moves_list = self.parse_top_moves(game_row.get('compact_top_moves', '[]'))
             
             # Skip games with no moves or evaluations
@@ -514,7 +524,6 @@ class GameFeatureExtractor:
             
             # Convert PGN to board positions and game object
             positions, game = self.pgn_to_board_positions(pgn_text)
-            # logger.debug(f"DEBUG: positions: {positions}")
             
             # Skip games with parsing errors
             if not positions or not game:
@@ -562,16 +571,30 @@ class GameFeatureExtractor:
             # Calculate move accuracies
             move_accuracies = self.calculate_move_accuracies(positions, info_objects, mainline_moves)
             
-            # Calculate overall player accuracies
-            white_accuracy, black_accuracy = self.calculate_player_accuracies(move_accuracies, positions)
+            # Calculate overall player accuracies and phase-specific accuracies
+            white_accuracy, black_accuracy, phase_accuracies = self.calculate_player_accuracies(
+                move_accuracies, positions, features
+            )
             
             # Calculate move statistics
             capture_freq_white, capture_freq_black, check_freq_white, check_freq_black, castle_move_white, castle_move_black = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
             
+            # Calculate opening novelty score and get opening information
+            opening_novelty_score, eco_code, opening_name, matching_plies = self.calculate_opening_novelty_score(game, features, game_row.get('eco'))
+            features.opening_novelty_score = opening_novelty_score
+            features.opening_name = opening_name
+            features.eco = eco_code  # Store the matched ECO code
+            features.matching_plies = matching_plies  # Store the matching plies for accurate deviation calculation
             
             # Update accuracy values in features
             features.white_accuracy = white_accuracy
             features.black_accuracy = black_accuracy
+            features.white_opening_accuracy = phase_accuracies['white']['opening']
+            features.white_middlegame_accuracy = phase_accuracies['white']['middlegame']
+            features.white_endgame_accuracy = phase_accuracies['white']['endgame']
+            features.black_opening_accuracy = phase_accuracies['black']['opening']
+            features.black_middlegame_accuracy = phase_accuracies['black']['middlegame']
+            features.black_endgame_accuracy = phase_accuracies['black']['endgame']
             
             # Add features to game data
             result = game_row.copy()
@@ -590,6 +613,14 @@ class GameFeatureExtractor:
             result['check_frequency_black'] = check_freq_black
             result['castle_move_white'] = castle_move_white
             result['castle_move_black'] = castle_move_black
+            
+            # Add ECO code if not already in the data
+            if not result.get('eco') and eco_code:
+                result['eco'] = eco_code
+                
+            # Add opening name if not already in the data
+            if not result.get('opening') and opening_name:
+                result['opening'] = opening_name
             
             return result
         
@@ -644,7 +675,7 @@ def main():
         if args.debug:
             logger.info("Debug mode: Reading entire CSV file")
             df = pd.read_csv(input_csv)
-            row_to_process = 0 # Default row number for debug mode
+            row_to_process = 11 # Default row number for debug mode
             logger.info(f"Processing row {row_to_process} in debug mode")
             if row_to_process < len(df):
                 game_row = df.iloc[row_to_process].to_dict()
@@ -758,6 +789,140 @@ def main():
         traceback.print_exc()
         sys.exit(1)
 
+def print_accuracy_summary(features):
+    """Print a summary of player accuracies by phase"""
+    try:
+        from colorama import Fore, Back, Style, init
+        init()
+    except ImportError:
+        class DummyFore:
+            def __getattr__(self, name):
+                return ""
+        class DummyStyle:
+            def __getattr__(self, name):
+                return ""
+        Fore = DummyFore()
+        Style = DummyStyle()
+    
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}PLAYER ACCURACY BY PHASE{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Create a nice table-like output
+    print(f"{'Player':<8} | {'Overall':<10} | {'Opening':<10} | {'Middlegame':<10} | {'Endgame':<10}")
+    print("-"*60)
+    
+    # Get accuracy values
+    white_overall = features.get('white_accuracy', 0.0)
+    white_opening = features.get('white_opening_accuracy', 0.0)
+    white_middlegame = features.get('white_middlegame_accuracy', 0.0)
+    white_endgame = features.get('white_endgame_accuracy', 0.0)
+    
+    black_overall = features.get('black_accuracy', 0.0)
+    black_opening = features.get('black_opening_accuracy', 0.0)
+    black_middlegame = features.get('black_middlegame_accuracy', 0.0)
+    black_endgame = features.get('black_endgame_accuracy', 0.0)
+    
+    # Helper function to color-code accuracy values
+    def color_accuracy(acc):
+        if acc >= 90:
+            return f"{Fore.GREEN}{acc:.1f}%{Style.RESET_ALL}"
+        elif acc >= 80:
+            return f"{Fore.CYAN}{acc:.1f}%{Style.RESET_ALL}"
+        elif acc >= 70:
+            return f"{Fore.BLUE}{acc:.1f}%{Style.RESET_ALL}"
+        elif acc >= 60:
+            return f"{Fore.YELLOW}{acc:.1f}%{Style.RESET_ALL}"
+        else:
+            return f"{Fore.RED}{acc:.1f}%{Style.RESET_ALL}"
+    
+    # Print White's accuracies with better alignment
+    print(f"{Fore.WHITE}{Style.BRIGHT}White{Style.RESET_ALL}    | {color_accuracy(white_overall)}      | {color_accuracy(white_opening)}      | {color_accuracy(white_middlegame)}      | {color_accuracy(white_endgame)}")
+    
+    # Print Black's accuracies with better alignment
+    print(f"{Fore.MAGENTA}{Style.BRIGHT}Black{Style.RESET_ALL}    | {color_accuracy(black_overall)}      | {color_accuracy(black_opening)}      | {color_accuracy(black_middlegame)}      | {color_accuracy(black_endgame)}")
+
+def print_opening_summary(features, game_data):
+    """Print a summary of the opening phase including novelty information"""
+    try:
+        from colorama import Fore, Back, Style, init
+        init()
+    except ImportError:
+        class DummyFore:
+            def __getattr__(self, name):
+                return ""
+        class DummyStyle:
+            def __getattr__(self, name):
+                return ""
+        Fore = DummyFore()
+        Style = DummyStyle()
+    
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}OPENING ANALYSIS{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Get ECO code and opening name from features or game data
+    eco_code = features.get('eco', game_data.get('eco', 'Unknown'))
+    opening_name = features.get('opening_name', game_data.get('opening', 'Unknown Opening'))
+    
+    # Calculate opening information
+    total_moves = features.get('total_moves', 0)
+    opening_length = features.get('opening_length', 0)
+    total_opening_moves = int(opening_length * total_moves)
+    
+    # Get opening novelty score
+    novelty_score = features.get('opening_novelty_score', 0.0)
+    
+    # Get the matching plies directly from features if available
+    matching_plies = features.get('matching_plies', 0)
+    
+    # Calculate how many moves matched theory before deviation
+    # The novelty score is the ratio of matching moves to total opening moves
+    # So multiply by total_opening_moves to get the actual number of matching moves
+    matching_moves = int(novelty_score * total_opening_moves)
+    
+    # Display opening information
+    print(f"{Fore.CYAN}{Style.BRIGHT}Opening Information:{Style.RESET_ALL}")
+    print(f"  ECO Code: {Fore.YELLOW}{eco_code}{Style.RESET_ALL}")
+    print(f"  Opening: {Fore.YELLOW}{opening_name}{Style.RESET_ALL}")
+    print(f"  Opening Length: {total_opening_moves} moves ({opening_length:.0%} of game)")
+    
+    # Display theory deviation
+    print(f"\n{Fore.CYAN}{Style.BRIGHT}Opening Theory:{Style.RESET_ALL}")
+    if matching_moves > 0:
+        if matching_moves == total_opening_moves:
+            print(f"  {Fore.GREEN}Players followed established theory for the entire opening phase: {matching_moves}/{total_opening_moves} moves{Style.RESET_ALL}")
+        else:
+            # Calculate the deviation point in terms of move number and player
+            # Use the stored matching_plies if available, otherwise estimate from matching_moves
+            if matching_plies > 0:
+                # Use the actual matching plies from the feature extractor
+                actual_matching_plies = matching_plies
+            else:
+                # Fallback calculation if matching_plies not provided
+                actual_matching_plies = matching_moves * 2
+            
+            # Add 1 to get the deviation ply (1-indexed)
+            deviation_ply = actual_matching_plies + 1
+            
+            # Calculate whether it's White's or Black's move at the deviation point
+            is_white_deviation = (deviation_ply % 2 == 1)
+            
+            # Calculate the full move number (1. e4 e5 is move 1)
+            deviation_move_number = (deviation_ply + 1) // 2 if is_white_deviation else deviation_ply // 2
+            
+            deviating_player = "White" if is_white_deviation else "Black"
+            player_color = Fore.WHITE if is_white_deviation else Fore.MAGENTA
+            
+            print(f"  Players followed established theory for {Fore.YELLOW}{matching_moves}/{total_opening_moves}{Style.RESET_ALL} moves")
+            print(f"  First deviation from theory occurred on move {Fore.YELLOW}{deviation_move_number}{Style.RESET_ALL}" + 
+                  f" by {player_color}{Style.BRIGHT}{deviating_player}{Style.RESET_ALL}")
+            print(f"  Opening novelty score: {novelty_score:.2f}")
+    else:
+        print(f"  {Fore.RED}No established opening theory was followed{Style.RESET_ALL}")
+        print(f"  Either unknown opening or immediate deviation")
+        print(f"  Opening novelty score: {novelty_score:.2f}")
+
 def print_game_analysis(result, game_data):
     """Print detailed analysis of a game similar to test.py"""
     try:
@@ -785,7 +950,10 @@ def print_game_analysis(result, game_data):
         if key in game_data:
             print(f"  {key.title()}: {game_data[key]}")
     
-    # Print sharpness summary if available (moved to top)
+    # Print opening summary (new)
+    print_opening_summary(result, game_data)
+    
+    # Print sharpness summary if available
     if 'overall_sharpness' in result and 'white_sharpness' in result and 'black_sharpness' in result:
         print_sharpness_summary({
             'sharpness': result['overall_sharpness'],
@@ -793,7 +961,10 @@ def print_game_analysis(result, game_data):
             'black_sharpness': result['black_sharpness']
         })
     
-    # Print move statistics if available (moved to top)
+    # Print accuracy summary
+    print_accuracy_summary(result)
+    
+    # Print move statistics if available
     if 'capture_frequency_white' in result or 'capture_frequency_black' in result:
         print_move_statistics(result)
     
@@ -805,7 +976,7 @@ def print_game_analysis(result, game_data):
         print_judgment_summary(result)
 
 def print_feature_summary(features):
-    """Print the feature summary with formatting"""
+    """Print a summary of the extracted features"""
     try:
         from colorama import Fore, Back, Style, init
         init()
@@ -819,53 +990,31 @@ def print_feature_summary(features):
         Fore = DummyFore()
         Style = DummyStyle()
     
-    print("\n" + "="*80)
-    print(f"{Fore.BLUE}{Style.BRIGHT}GAME FEATURE SUMMARY{Style.RESET_ALL}")
-    print("="*80)
-    
-    # Organize features into categories
     categories = {
-        "Game Phase": [
+        "Game Structure": [
             "total_moves", "opening_length", "middlegame_length", "endgame_length"
         ],
-        "Development - White": [
-            "minor_piece_development_white", "queen_development_white"
+        "Opening Development": [
+            "opening_novelty_score", "opening_name", "minor_piece_development_white", "minor_piece_development_black", 
+            "queen_development_white", "queen_development_black"
         ],
-        "Development - Black": [
-            "minor_piece_development_black", "queen_development_black"
+        "Material Dynamics": [
+            "white_material_changes", "black_material_changes", "material_balance_std",
+            "material_volatility_white", "material_volatility_black"
         ],
-        "Engine Alignment - White": [
-            "top_move_alignment_white", "top2_3_move_alignment_white"
+        "Exchange Rates": [
+            "piece_exchange_rate_white", "piece_exchange_rate_black",
+            "pawn_exchange_rate_white", "pawn_exchange_rate_black"
         ],
-        "Engine Alignment - Black": [
-            "top_move_alignment_black", "top2_3_move_alignment_black"
+        "Positional Control": [
+            "white_piece_mobility_avg", "black_piece_mobility_avg",
+            "white_center_control_avg", "black_center_control_avg",
+            "space_advantage_white", "space_advantage_black"
         ],
-        "Material Features - White": [
-            "white_material_changes", "material_volatility_white", 
-            "piece_exchange_rate_white", "pawn_exchange_rate_white"
-        ],
-        "Material Features - Black": [
-            "black_material_changes", "material_volatility_black",
-            "piece_exchange_rate_black", "pawn_exchange_rate_black"
-        ],
-        "Material Balance": [
-            "material_balance_std"
-        ],
-        "Position Control - White": [
-            "white_piece_mobility_avg", "white_center_control_avg",
-            "space_advantage_white", "pawn_control_white",
-            "white_pawn_structure_changes"
-        ],
-        "Position Control - Black": [
-            "black_piece_mobility_avg", "black_center_control_avg",
-            "space_advantage_black", "pawn_control_black",
-            "black_pawn_structure_changes"
-        ],
-        "King Safety - White": [
-            "white_king_safety", "white_king_safety_min", "white_vulnerability_spikes"
-        ],
-        "King Safety - Black": [
-            "black_king_safety", "black_king_safety_min", "black_vulnerability_spikes"
+        "King Safety": [
+            "white_king_safety", "black_king_safety",
+            "white_king_safety_min", "black_king_safety_min",
+            "white_vulnerability_spikes", "black_vulnerability_spikes"
         ],
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
@@ -873,11 +1022,17 @@ def print_feature_summary(features):
             "white_sacrifice_count", "white_avg_eval_change", "white_eval_volatility",
             "white_accuracy"
         ],
+        "White Accuracy by Phase": [
+            "white_opening_accuracy", "white_middlegame_accuracy", "white_endgame_accuracy"
+        ],
         "Black Move Quality": [
             "black_brilliant_count", "black_great_count", "black_good_moves",
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
             "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
             "black_accuracy"
+        ],
+        "Black Accuracy by Phase": [
+            "black_opening_accuracy", "black_middlegame_accuracy", "black_endgame_accuracy"
         ],
         "Move Statistics - White": [
             "capture_frequency_white", "check_frequency_white", "castle_move_white"
@@ -893,41 +1048,25 @@ def print_feature_summary(features):
         for name in feature_names:
             if name in features:
                 value = features[name]
-                
-                # Apply color formatting
-                if "brilliant" in name or "great" in name:
-                    # Highlight brilliant/great moves in green
-                    formatted_value = f"{Fore.GREEN}{int(value)}{Style.RESET_ALL}"
-                elif "inaccuracy" in name:
-                    # Highlight inaccuracies in yellow
-                    formatted_value = f"{Fore.YELLOW}{int(value)}{Style.RESET_ALL}"
-                elif "mistake" in name or "blunder" in name:
-                    # Highlight mistakes/blunders in red
-                    formatted_value = f"{Fore.RED}{int(value)}{Style.RESET_ALL}"
-                elif "accuracy" in name:
-                    # Format accuracy with color based on value
-                    acc_value = float(value)
-                    if acc_value >= 90:
-                        color = Fore.GREEN
-                    elif acc_value >= 80:
-                        color = Fore.CYAN
-                    elif acc_value >= 70:
-                        color = Fore.BLUE
-                    elif acc_value >= 60:
-                        color = Fore.YELLOW
+                # Format opening_novelty_score as a fraction (e.g., "2/11")
+                if name == "opening_novelty_score" and 'total_moves' in features and 'opening_length' in features:
+                    total_opening_moves = int(features['opening_length'] * features['total_moves'])
+                    theoretical_moves = int(value * total_opening_moves)
+                    if features.get('eco', ''):
+                        display_value = f"{theoretical_moves}/{total_opening_moves} ({value:.2f}) - ECO: {features.get('eco', '')}"
                     else:
-                        color = Fore.RED
-                    formatted_value = f"{color}{acc_value:.1f}%{Style.RESET_ALL}"
-                elif name.endswith('_count') or name.endswith('_changes') or name == 'total_moves':
-                    formatted_value = f"{int(value)}"
+                        display_value = f"{theoretical_moves}/{total_opening_moves} ({value:.2f})"
+                elif name == "opening_name":
+                    display_value = f"{value}"
+                elif isinstance(value, float):
+                    if name.endswith('_accuracy'):
+                        display_value = f"{value:.1f}%"
+                    else:
+                        display_value = f"{value:.2f}"
                 else:
-                    formatted_value = f"{float(value):.2f}"
-                
-                # Format the name nicely
-                pretty_name = name.replace('_', ' ').title()
-                print(f"  {pretty_name}: {formatted_value}")
-            else:
-                print(f"  {name.replace('_', ' ').title()}: N/A")
+                    display_value = str(value)
+                print(f"  {name}: {display_value}")
+    print("")
 
 def print_judgment_summary(features):
     """Print a summary of the move judgments"""

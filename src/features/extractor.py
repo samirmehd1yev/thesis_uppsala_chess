@@ -1298,32 +1298,158 @@ class FeatureExtractor:
     
     def count_sacrifices(self, positions: List[chess.Board], moves: List[chess.Move], features: FeatureVector) -> None:
         """
-        Count sacrifices for both players
+        Count sacrifices by each player.
         
         Args:
             positions: List of board positions
             moves: List of moves played
-            features: FeatureVector object to update
+            features: FeatureVector to update with sacrifice counts
         """
-        # Convert moves to a list if it's not already one
-        if not isinstance(moves, list):
-            moves = list(moves)
+        if not positions or not moves or len(positions) <= len(moves):
+            return
             
+        # Initialize sacrifice counters
         white_sacrifices = 0
         black_sacrifices = 0
         
         for i in range(len(moves)):
-            if i < len(positions) and i+1 < len(positions):
-                prev_board = positions[i]
-                curr_board = positions[i+1]
-                move = moves[i]
+            # Skip if we don't have enough position data
+            if i >= len(positions) - 1:
+                break
                 
-                if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
-                    is_white = i % 2 == 0  # Even indices are White's moves
-                    if is_white:
-                        white_sacrifices += 1
-                    else:
-                        black_sacrifices += 1
+            move = moves[i]
+            prev_board = positions[i]
+            curr_board = positions[i+1]
+            is_white = i % 2 == 0  # Even indices are White's moves
+            
+            # Check for sacrifice
+            if MoveAnalyzer.is_piece_sacrifice(prev_board, curr_board, move):
+                if is_white:
+                    white_sacrifices += 1
+                else:
+                    black_sacrifices += 1
         
+        # Update features
         features.white_sacrifice_count = white_sacrifices
         features.black_sacrifice_count = black_sacrifices
+    
+    def calculate_opening_novelty_score(self, eco_code: str, game_moves_uci: List[str], opening_length: float, total_moves: int) -> Tuple[float, str, str, int]:
+        """
+        Calculate the opening novelty score based on how many moves match the ECO database.
+        Always uses find_closest_opening to match game moves against known openings.
+        
+        Args:
+            eco_code: The ECO code from the game metadata (used only as a fallback)
+            game_moves_uci: List of UCI notation moves from the game
+            opening_length: Proportion of the game considered to be the opening phase
+            total_moves: Total number of full moves in the game
+            
+        Returns:
+            Tuple of (opening_novelty_score, opening_name, matched_eco_code, matching_plies) where:
+            opening_novelty_score is the ratio of theoretical moves to total opening moves
+            opening_name is the name of the opening from the ECO database
+            matched_eco_code is the ECO code of the closest matching opening
+            matching_plies is the number of half-moves that matched before deviation
+        """
+        # Import the eco_loader here to avoid circular imports
+        from tools.eco_database_loader import eco_loader
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Calculate total moves in opening phase
+            total_opening_moves = int(opening_length * total_moves)
+            
+            logger.debug(f"Calculating opening novelty score for original ECO code: {eco_code}")
+            logger.debug(f"Total moves: {total_moves}, Opening length: {opening_length:.2f}, Total opening moves: {total_opening_moves}")
+            
+            if total_opening_moves <= 0:
+                logger.warning(f"Invalid opening data: total_opening_moves={total_opening_moves}")
+                return 0.0, "Unknown Opening", eco_code if eco_code else "Unknown", 0
+            
+            # Limit to opening moves only
+            game_opening_moves = game_moves_uci[:min(total_opening_moves*2, len(game_moves_uci))]  # *2 because each move is two plies
+            
+            # Always use find_closest_opening to match the game moves against the database
+            logger.debug(f"Finding closest opening for game moves")
+            opening_match = eco_loader.find_closest_opening(game_opening_moves)
+            
+            if not opening_match or opening_match['matching_moves'] == 0:
+                logger.warning(f"No matching opening found in the database")
+                
+                # Fall back to the original ECO code if provided and valid
+                if eco_code:
+                    # Try to get theoretical moves for the standard ECO code
+                    standard_eco = eco_code[:3] if eco_code and len(eco_code) >= 3 else eco_code
+                    theoretical_moves_list = eco_loader.get_theoretical_moves(standard_eco)
+                    opening_name = eco_loader.get_opening_name(standard_eco)
+                    
+                    if theoretical_moves_list:
+                        logger.debug(f"Using fallback ECO code {standard_eco} - found {len(theoretical_moves_list)} theoretical moves")
+                    else:
+                        logger.warning(f"No theoretical moves found for ECO code {standard_eco}")
+                        return 0.0, "Unknown Opening", eco_code if eco_code else "Unknown", 0
+                else:
+                    return 0.0, "Unknown Opening", "Unknown", 0
+            else:
+                # Use the closest opening match from the database
+                theoretical_moves_list = opening_match['uci']
+                opening_name = opening_match['name']
+                matched_eco = opening_match['eco']
+                matching_plies = opening_match['matching_moves']
+                logger.debug(f"Found closest opening: {opening_name} (ECO: {matched_eco}) with {matching_plies} matching plies")
+                
+                # Use integer division to get the number of full moves
+                matching_moves = matching_plies // 2
+                
+                # If the matching_plies is odd, that means we've completed a White move but not Black's response
+                # We count that as half a move, so we need to round up only if it's a complete move
+                if matching_plies > 0 and matching_plies % 2 == 1:
+                    # First deviation was by Black, so White's move is still valid - count it as a full move
+                    matching_moves += 1
+                
+                # Calculate novelty score as ratio of matching moves to total opening moves
+                opening_novelty_score = matching_moves / total_opening_moves if total_opening_moves > 0 else 0.0
+                
+                logger.debug(f"Opening novelty score: {opening_novelty_score:.2f} ({matching_moves}/{total_opening_moves})")
+                
+                return opening_novelty_score, opening_name, matched_eco, matching_plies
+            
+            # If we're using the fallback ECO lookup, count matching moves manually
+            # Now count how many consecutive moves match the theoretical moves
+            matching_plies = 0
+            
+            # Each full move is two plies (White's move and Black's move)
+            # So we need to calculate matching plies for proper comparison
+            max_plies_to_check = min(len(theoretical_moves_list), len(game_moves_uci))
+            
+            for i in range(max_plies_to_check):
+                if i < len(theoretical_moves_list) and i < len(game_moves_uci) and theoretical_moves_list[i] == game_moves_uci[i]:
+                    matching_plies += 1
+                else:
+                    # Stop at first deviation
+                    break
+            
+            # Use integer division to get the number of full moves
+            matching_moves = matching_plies // 2
+            
+            # If the matching_plies is odd, that means we've completed a White move but not Black's response
+            # We count that as half a move, so we need to round up only if it's a complete move
+            if matching_plies > 0 and matching_plies % 2 == 1:
+                # First deviation was by Black, so White's move is still valid - count it as a full move
+                matching_moves += 1
+            
+            logger.debug(f"Theoretical moves from ECO code: {len(theoretical_moves_list)}")
+            logger.debug(f"Matching plies before deviation: {matching_plies}")
+            logger.debug(f"Matching full moves before deviation: {matching_moves}")
+            
+            # Calculate novelty score as ratio of matching moves to total opening moves
+            opening_novelty_score = matching_moves / total_opening_moves if total_opening_moves > 0 else 0.0
+            
+            logger.debug(f"Opening novelty score: {opening_novelty_score:.2f} ({matching_moves}/{total_opening_moves})")
+            
+            return opening_novelty_score, opening_name, eco_code, matching_plies
+            
+        except Exception as e:
+            logger.error(f"Error calculating opening novelty score: {e}")
+            return 0.0, "Unknown Opening", eco_code if eco_code else "Unknown", 0

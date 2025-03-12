@@ -95,6 +95,7 @@ class GameAnalyzer:
             - move_accuracies: List of accuracy scores for each move
             - white_accuracy: Overall accuracy for white player
             - black_accuracy: Overall accuracy for black player
+            - phase_accuracies: Accuracy metrics broken down by game phase
         """
         logger.info("Starting game analysis...")
         start_time = time.time()
@@ -144,14 +145,43 @@ class GameAnalyzer:
             logger.info("Calculating move accuracies...")
             move_accuracies = self._calculate_move_accuracies(positions, evals, mainline_moves)
             
-            # Calculate overall player accuracies
-            white_accuracy, black_accuracy = self._calculate_player_accuracies(move_accuracies, positions)
+            # Extract phase boundaries from features
+            phase_info = None
+            if hasattr(features, 'opening_length') and hasattr(features, 'middlegame_length'):
+                # Convert normalized phase lengths to actual move numbers
+                total_moves = int(features.total_moves)
+                opening_end = max(1, int(features.opening_length * total_moves))
+                middlegame_end = min(total_moves, int((features.opening_length + features.middlegame_length) * total_moves))
+                
+                phase_info = {
+                    'opening_end': opening_end,
+                    'middlegame_end': middlegame_end
+                }
+                
+                logger.info(f"Extracted phase boundaries from features: opening_end={opening_end}, middlegame_end={middlegame_end}")
+            
+            # Calculate overall player accuracies and phase-specific accuracies
+            white_accuracy, black_accuracy, phase_accuracies = self._calculate_player_accuracies(
+                move_accuracies, positions, phase_info
+            )
             print(f"Debug: White's accuracy: {white_accuracy:.1f}%")
             print(f"Debug: Black's accuracy: {black_accuracy:.1f}%")
+            print(f"Debug: White's opening accuracy: {phase_accuracies['white']['opening']:.1f}%")
+            print(f"Debug: White's middlegame accuracy: {phase_accuracies['white']['middlegame']:.1f}%")
+            print(f"Debug: White's endgame accuracy: {phase_accuracies['white']['endgame']:.1f}%")
+            print(f"Debug: Black's opening accuracy: {phase_accuracies['black']['opening']:.1f}%")
+            print(f"Debug: Black's middlegame accuracy: {phase_accuracies['black']['middlegame']:.1f}%")
+            print(f"Debug: Black's endgame accuracy: {phase_accuracies['black']['endgame']:.1f}%")
             
             # Set accuracy values in the feature vector
             features.white_accuracy = white_accuracy
             features.black_accuracy = black_accuracy
+            features.white_opening_accuracy = phase_accuracies['white']['opening']
+            features.white_middlegame_accuracy = phase_accuracies['white']['middlegame']
+            features.white_endgame_accuracy = phase_accuracies['white']['endgame']
+            features.black_opening_accuracy = phase_accuracies['black']['opening']
+            features.black_middlegame_accuracy = phase_accuracies['black']['middlegame']
+            features.black_endgame_accuracy = phase_accuracies['black']['endgame']
             
             logger.info(f"Total analysis completed in {time.time() - start_time:.2f} seconds")
             
@@ -165,7 +195,8 @@ class GameAnalyzer:
                 "cumulative_sharpness": cumulative_sharpness,
                 "move_accuracies": move_accuracies,
                 "white_accuracy": white_accuracy,
-                "black_accuracy": black_accuracy
+                "black_accuracy": black_accuracy,
+                "phase_accuracies": phase_accuracies
             }
         
         except Exception as e:
@@ -400,9 +431,11 @@ class GameAnalyzer:
             
         return move_accuracies
     
-    def _calculate_player_accuracies(self, move_accuracies: List[Dict[str, float]], positions: List[chess.Board]) -> Tuple[float, float]:
+    def _calculate_player_accuracies(self, move_accuracies: List[Dict[str, float]], positions: List[chess.Board], 
+                               phase_info: Dict[str, int] = None) -> Tuple[float, float, Dict[str, Dict[str, float]]]:
         """
         Calculate overall accuracy for white and black players using Lichess approach.
+        Also calculates separate accuracy metrics for opening, middlegame, and endgame phases.
         
         Computes a mix of weighted mean (based on position volatility) and harmonic mean
         of individual move accuracies.
@@ -410,12 +443,18 @@ class GameAnalyzer:
         Args:
             move_accuracies: List of dictionaries containing move accuracy information
             positions: List of chess board positions
+            phase_info: Dictionary with phase boundary information (opening_end, middlegame_end)
             
         Returns:
-            Tuple of (white_accuracy, black_accuracy)
+            Tuple of (white_accuracy, black_accuracy, phase_accuracies)
+            where phase_accuracies is a dictionary with phase-specific accuracy metrics
         """
         if not move_accuracies:
-            return 0.0, 0.0
+            empty_phases = {
+                "white": {"opening": 0.0, "middlegame": 0.0, "endgame": 0.0},
+                "black": {"opening": 0.0, "middlegame": 0.0, "endgame": 0.0}
+            }
+            return 0.0, 0.0, empty_phases
             
         # Get all win percentages for volatility calculation
         all_win_percents = []
@@ -462,12 +501,47 @@ class GameAnalyzer:
         # Pair moves with weights (similar to Lichess's zip(allWinPercents.sliding(2), weights))
         weighted_accuracies_by_color = {"white": [], "black": []}
         
+        # Determine game phases based on actual phase detection or fallback to move numbers
+        total_moves = len(move_accuracies)
+        
+        if phase_info and 'opening_end' in phase_info and 'middlegame_end' in phase_info:
+            # Use actual phase detection
+            opening_end = phase_info['opening_end']
+            middlegame_end = phase_info['middlegame_end']
+            logger.debug(f"Using actual phase detection: opening_end={opening_end}, middlegame_end={middlegame_end}")
+        else:
+            # Fallback to simplified approach
+            opening_end = min(15, total_moves // 3)  # First 15 moves or 1/3 of the game
+            middlegame_end = total_moves - max(10, total_moves // 4)  # Last 10 moves or 1/4 of the game
+            logger.debug(f"Using simplified phase detection: opening_end={opening_end}, middlegame_end={middlegame_end}")
+        
+        # Track phase-specific accuracies
+        weighted_accuracies_by_phase = {
+            "white": {"opening": [], "middlegame": [], "endgame": []},
+            "black": {"opening": [], "middlegame": [], "endgame": []}
+        }
+        
+        # Process move accuracies
         for i, acc in enumerate(move_accuracies):
             if i < len(weights):
                 weight = weights[i]
                 color = acc["player"]
                 accuracy = acc["accuracy"]
+                move_number = acc["move_number"]
+                
+                # Add to overall accuracy
                 weighted_accuracies_by_color[color].append((accuracy, weight))
+                
+                # Determine phase and add to phase-specific accuracy
+                if move_number <= opening_end:
+                    phase = "opening"
+                elif move_number > middlegame_end:
+                    phase = "endgame"
+                else:
+                    phase = "middlegame"
+                
+                # Add accuracy to the appropriate phase
+                weighted_accuracies_by_phase[color][phase].append((accuracy, weight))
                 
         def weighted_mean(weighted_values):
             """Calculate weighted mean like Lichess's Maths.weightedMean"""
@@ -487,18 +561,34 @@ class GameAnalyzer:
             if not non_zero_values:
                 return 0.0
             return len(non_zero_values) / sum(1.0 / v for v in non_zero_values)
+        
+        def calculate_combined_accuracy(weighted_values):
+            """Calculate combined accuracy from weighted values (weighted + harmonic mean)"""
+            if not weighted_values:
+                return 0.0
+            weighted_mean_value = weighted_mean(weighted_values)
+            harmonic_mean_value = harmonic_mean([acc for acc, _ in weighted_values])
+            return (weighted_mean_value + harmonic_mean_value) / 2
             
-        # Calculate white accuracy (exactly like Lichess)
-        white_weighted = weighted_mean(weighted_accuracies_by_color["white"])
-        white_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["white"]])
-        white_accuracy = (white_weighted + white_harmonic) / 2
+        # Calculate overall accuracies
+        white_accuracy = calculate_combined_accuracy(weighted_accuracies_by_color["white"])
+        black_accuracy = calculate_combined_accuracy(weighted_accuracies_by_color["black"])
         
-        # Calculate black accuracy (exactly like Lichess)
-        black_weighted = weighted_mean(weighted_accuracies_by_color["black"])
-        black_harmonic = harmonic_mean([acc for acc, _ in weighted_accuracies_by_color["black"]])
-        black_accuracy = (black_weighted + black_harmonic) / 2
+        # Calculate phase-specific accuracies
+        phase_accuracies = {
+            "white": {
+                "opening": calculate_combined_accuracy(weighted_accuracies_by_phase["white"]["opening"]),
+                "middlegame": calculate_combined_accuracy(weighted_accuracies_by_phase["white"]["middlegame"]),
+                "endgame": calculate_combined_accuracy(weighted_accuracies_by_phase["white"]["endgame"])
+            },
+            "black": {
+                "opening": calculate_combined_accuracy(weighted_accuracies_by_phase["black"]["opening"]),
+                "middlegame": calculate_combined_accuracy(weighted_accuracies_by_phase["black"]["middlegame"]),
+                "endgame": calculate_combined_accuracy(weighted_accuracies_by_phase["black"]["endgame"])
+            }
+        }
         
-        return white_accuracy, black_accuracy
+        return white_accuracy, black_accuracy, phase_accuracies
     
     def format_analysis_report(self, analysis_result: Dict[str, Any], html: bool = False) -> str:
         """
@@ -542,8 +632,27 @@ class GameAnalyzer:
             report.append("Player Accuracies:")
             white_accuracy = analysis_result.get("white_accuracy", 0.0)
             black_accuracy = analysis_result.get("black_accuracy", 0.0)
-            report.append(f"  White Accuracy: {white_accuracy:.1f}%")
-            report.append(f"  Black Accuracy: {black_accuracy:.1f}%")
+            phase_accuracies = analysis_result.get("phase_accuracies", None)
+            
+            report.append(f"  White Overall Accuracy: {white_accuracy:.1f}%")
+            report.append(f"  Black Overall Accuracy: {black_accuracy:.1f}%")
+            
+            # Add phase-specific accuracies if available
+            if phase_accuracies:
+                # White phase-specific accuracies
+                report.append("")
+                report.append("  White Accuracy by Phase:")
+                report.append(f"    Opening: {phase_accuracies['white']['opening']:.1f}%")
+                report.append(f"    Middlegame: {phase_accuracies['white']['middlegame']:.1f}%")
+                report.append(f"    Endgame: {phase_accuracies['white']['endgame']:.1f}%")
+                
+                # Black phase-specific accuracies
+                report.append("")
+                report.append("  Black Accuracy by Phase:")
+                report.append(f"    Opening: {phase_accuracies['black']['opening']:.1f}%")
+                report.append(f"    Middlegame: {phase_accuracies['black']['middlegame']:.1f}%")
+                report.append(f"    Endgame: {phase_accuracies['black']['endgame']:.1f}%")
+            
             report.append("")
             
             # Game phase
@@ -692,6 +801,28 @@ class GameAnalyzer:
             # Add features as HTML tables
             if features:
                 html_report += "<h2>Game Feature Summary</h2>"
+                
+                # Player accuracies table
+                html_report += "<h3>Player Accuracies</h3>"
+                html_report += "<table>"
+                html_report += "<tr><th>Player</th><th>Overall</th><th>Opening</th><th>Middlegame</th><th>Endgame</th></tr>"
+                
+                # Use phase_accuracies if available
+                if phase_accuracies:
+                    html_report += f"<tr><td>White</td><td>{white_accuracy:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['white']['opening']:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['white']['middlegame']:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['white']['endgame']:.1f}%</td></tr>"
+                    
+                    html_report += f"<tr><td>Black</td><td>{black_accuracy:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['black']['opening']:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['black']['middlegame']:.1f}%</td>"
+                    html_report += f"<td>{phase_accuracies['black']['endgame']:.1f}%</td></tr>"
+                else:
+                    html_report += f"<tr><td>White</td><td>{white_accuracy:.1f}%</td><td>-</td><td>-</td><td>-</td></tr>"
+                    html_report += f"<tr><td>Black</td><td>{black_accuracy:.1f}%</td><td>-</td><td>-</td><td>-</td></tr>"
+                
+                html_report += "</table>"
                 
                 # Game phase table
                 html_report += "<h3>Game Phase</h3>"
