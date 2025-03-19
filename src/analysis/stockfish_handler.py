@@ -262,14 +262,14 @@ class StockfishHandler:
             
             # Prepare WDL dictionary if available
             wdl_dict = None
-            if wdl:
-                # The WDL values from Stockfish are in permille (0-1000)
-                # Convert to 0-1 range for better handling in sharpness calculation
-                wdl_dict = {
-                    "wins": wdl[0] / 1000.0 ,
-                    "draws": wdl[1] / 1000.0,
-                    "losses": wdl[2] / 1000.0
-                }
+            # if wdl:
+            #     # The WDL values from Stockfish are in permille (0-1000)
+            #     # Convert to 0-1 range for better handling in sharpness calculation
+            #     wdl_dict = {
+            #         "wins": wdl[0] / 1000.0 ,
+            #         "draws": wdl[1] / 1000.0,
+            #         "losses": wdl[2] / 1000.0
+            #     }
             
             # Create Info object with evaluation and variations
             info = Info(

@@ -26,7 +26,8 @@ class GameAnalyzer:
     """
     
     def __init__(self, stockfish_path: str = "stockfish", analysis_depth: int = 16, 
-                 threads: int = None, hash_size: int = 128, num_cpus: int = None):
+                 threads: int = None, hash_size: int = 128, num_cpus: int = None,
+                 lc0_path: str = None, network_path: str = None):
         """
         Initialize the GameAnalyzer.
         
@@ -36,11 +37,15 @@ class GameAnalyzer:
             threads: Number of threads for each Stockfish instance
             hash_size: Hash table size in MB for Stockfish
             num_cpus: Number of CPU cores to use for parallel analysis (defaults to cores-1)
+            lc0_path: Path to Leela Chess Zero executable for sharpness analysis
+            network_path: Path to neural network file for LC0
         """
         self.stockfish_path = stockfish_path
         self.analysis_depth = analysis_depth
         self.threads = threads or 1
         self.hash_size = hash_size
+        self.lc0_path = lc0_path
+        self.network_path = network_path
         
         # Set number of CPUs for parallel processing
         if num_cpus is None:
@@ -50,8 +55,11 @@ class GameAnalyzer:
             
         self.feature_extractor = FeatureExtractor()
         
-        # Add sharpness analyzer
-        self.sharpness_analyzer = WdlSharpnessAnalyzer()
+        # Add sharpness analyzer with LC0 configuration if available
+        self.sharpness_analyzer = WdlSharpnessAnalyzer(
+            lc0_path=self.lc0_path,
+            network_path=self.network_path
+        )
     
     def calculate_position_sharpness(self, positions: List[chess.Board], evals: List[Info]) -> List[Dict[str, float]]:
         """
@@ -140,6 +148,10 @@ class GameAnalyzer:
             print(f"Debug: Overall cumulative sharpness: {cumulative_sharpness['sharpness']:.2f}")
             print(f"Debug: White's cumulative sharpness: {cumulative_sharpness['white_sharpness']:.2f} (positions where White is to move)")
             print(f"Debug: Black's cumulative sharpness: {cumulative_sharpness['black_sharpness']:.2f} (positions where Black is to move)")
+            
+            # Set sharpness values in the feature vector
+            features.white_sharpness = cumulative_sharpness['white_sharpness']
+            features.black_sharpness = cumulative_sharpness['black_sharpness']
             
             # Calculate move accuracies
             logger.info("Calculating move accuracies...")

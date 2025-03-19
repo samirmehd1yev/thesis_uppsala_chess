@@ -74,7 +74,7 @@ class Info:
 #     endgame_length: float = 0.0         # Normalized proportion of game in endgame
     
 #     # Development metrics
-#     minor_piece_development_white: float = 0.0  # Move number when all minor pieces are developed
+#     white_minor_piece_: float = 0.0  # Move number when all minor pieces are developed
 #     minor_piece_development_black: float = 0.0  # Move number when all minor pieces are developed
 #     queen_development_white: float = 0.0        # Move number of first queen move
 #     queen_development_black: float = 0.0        # Move number of first queen move
@@ -189,12 +189,12 @@ class FeatureVector:
     endgame_length: float = 0.0         # Normalized proportion of game in endgame
     
     # Development metrics
-    minor_piece_development_white: float = 0.0  # Move number when all minor pieces are developed
-    minor_piece_development_black: float = 0.0  # Move number when all minor pieces are developed
-    queen_development_white: float = 0.0        # Move number of first queen move
-    queen_development_black: float = 0.0        # Move number of first queen move
-    castle_move_white: int = 0                  # Move number when castled (0 if never)
-    castle_move_black: int = 0                  # Move number when castled (0 if never)
+    white_minor_piece_development: float = 0.0  # Ratio of game completed when all minor pieces are developed (0-1)
+    black_minor_piece_development: float = 0.0  # Ratio of game completed when all minor pieces are developed (0-1)
+    white_queen_development: float = 0.0        # Ratio of game completed at first queen move (0-1)
+    black_queen_development: float = 0.0        # Ratio of game completed at first queen move (0-1)
+    white_castle_move: float = 0.0              # Ratio of game completed when castled (0 if never)
+    black_castle_move: float = 0.0              # Ratio of game completed when castled (0 if never)
 
     #--------------------------------------------------------------------------
     # MATERIAL DYNAMICS FEATURES
@@ -205,16 +205,16 @@ class FeatureVector:
     material_balance_std: float = 0.0           # Standard deviation of material balance
     
     # Material volatility
-    material_volatility_white: float = 0.0      # Average material value changes per White move
-    material_volatility_black: float = 0.0      # Average material value changes per Black move
+    white_material_volatility: float = 0.0      # Average material value changes per White move
+    black_material_volatility: float = 0.0      # Average material value changes per Black move
     
     # Exchange rates
-    piece_exchange_rate_white: float = 0.0      # Frequency of piece exchanges by White
-    piece_exchange_rate_black: float = 0.0      # Frequency of piece exchanges by Black
-    pawn_exchange_rate_white: float = 0.0       # Frequency of pawn exchanges by White
-    pawn_exchange_rate_black: float = 0.0       # Frequency of pawn exchanges by Black
-    capture_frequency_white: float = 0.0        # Ratio of captures to total white moves
-    capture_frequency_black: float = 0.0        # Ratio of captures to total black moves
+    white_piece_exchange_rate: float = 0.0      # Frequency of piece exchanges by White
+    black_piece_exchange_rate: float = 0.0      # Frequency of piece exchanges by Black
+    white_pawn_exchange_rate: float = 0.0       # Frequency of pawn exchanges by White
+    black_pawn_exchange_rate: float = 0.0       # Frequency of pawn exchanges by Black
+    white_capture_frequency: float = 0.0        # Ratio of captures to total white moves
+    black_capture_frequency: float = 0.0        # Ratio of captures to total black moves
 
     #--------------------------------------------------------------------------
     # POSITIONAL FEATURES
@@ -226,14 +226,14 @@ class FeatureVector:
     # Pawn structure
     white_pawn_structure_changes: float = 0.0   # Changes in White's pawn structure
     black_pawn_structure_changes: float = 0.0   # Changes in Black's pawn structure
-    pawn_control_white: float = 0.0             # Average squares controlled by White pawns
-    pawn_control_black: float = 0.0             # Average squares controlled by Black pawns
+    white_pawn_control: float = 0.0             # Average squares controlled by White pawns
+    black_pawn_control: float = 0.0             # Average squares controlled by Black pawns
     
     # Board control
     white_center_control_avg: float = 0.0       # Average center control by White
     black_center_control_avg: float = 0.0       # Average center control by Black
-    space_advantage_white: float = 0.0          # Average control of Black's half by White
-    space_advantage_black: float = 0.0          # Average control of White's half by Black
+    white_space_advantage: float = 0.0          # Average control of Black's half by White
+    black_space_advantage: float = 0.0          # Average control of White's half by Black
 
     #--------------------------------------------------------------------------
     # KING SAFETY FEATURES
@@ -244,8 +244,8 @@ class FeatureVector:
     black_king_safety_min: float = 0.0          # Minimum king safety for Black
     white_vulnerability_spikes: float = 0.0     # Number of sudden safety drops for White
     black_vulnerability_spikes: float = 0.0     # Number of sudden safety drops for Black
-    check_frequency_white: float = 0.0          # Ratio of checks to total white moves
-    check_frequency_black: float = 0.0          # Ratio of checks to total black moves
+    white_check_frequency: float = 0.0          # Ratio of checks to total white moves
+    black_check_frequency: float = 0.0          # Ratio of checks to total black moves
 
     #--------------------------------------------------------------------------
     # MOVE QUALITY FEATURES
@@ -258,6 +258,7 @@ class FeatureVector:
     white_avg_eval_change: float = 0.0          # Average evaluation change by White moves
     white_eval_volatility: float = 0.0          # Evaluation volatility after White moves
     white_sacrifice_count: float = 0.0          # Count of sacrifices by White
+    white_prophylactic_frequency: float = 0.0   # Preventative vs reactive moves ratio
     
     # Black move quality
     black_accuracy: float = 0.0                 # Overall accuracy for Black
@@ -267,6 +268,7 @@ class FeatureVector:
     black_avg_eval_change: float = 0.0          # Average evaluation change by Black moves
     black_eval_volatility: float = 0.0          # Evaluation volatility after Black moves
     black_sacrifice_count: float = 0.0          # Count of sacrifices by Black
+    black_prophylactic_frequency: float = 0.0   # Preventative vs reactive moves ratio
     
     # White move classification counts
     white_brilliant_count: float = 0.0          # Count of brilliant moves by White
@@ -287,10 +289,10 @@ class FeatureVector:
     #--------------------------------------------------------------------------
     # ENGINE ALIGNMENT FEATURES
     #--------------------------------------------------------------------------
-    top_move_alignment_white: float = 0.0       # % of moves where White played top engine move
-    top_move_alignment_black: float = 0.0       # % of moves where Black played top engine move
-    top2_3_move_alignment_white: float = 0.0    # % of moves where White played 2nd/3rd best move
-    top2_3_move_alignment_black: float = 0.0    # % of moves where Black played 2nd/3rd best move
+    white_top_move_alignment: float = 0.0       # % of moves where White played top engine move
+    black_top_move_alignment: float = 0.0       # % of moves where Black played top engine move
+    white_top2_3_move_alignment: float = 0.0    # % of moves where White played 2nd/3rd best move
+    black_top2_3_move_alignment: float = 0.0    # % of moves where Black played 2nd/3rd best move
     
     #--------------------------------------------------------------------------
     # STRATEGIC ORIENTATION FEATURES
@@ -298,35 +300,14 @@ class FeatureVector:
     opening_novelty_score: float = 0.0          # Ratio of moves matching ECO theory to total opening moves (higher = more "in book")
     opening_name: str = ""                      # Name of the recognized chess opening (e.g., "Sicilian Defense: Najdorf Variation")
     forced_complexity_index: float = 0.0        # Engine-derived complexity of created positions [1]
-    prophylactic_frequency: float = 0.0        # Preventative vs reactive moves ratio
+    white_sharpness: float = 0.0                # Cumulative sharpness score for white positions
+    black_sharpness: float = 0.0                # Cumulative sharpness score for black positions
 
     #--------------------------------------------------------------------------
     # ENHANCED MATERIAL DYNAMICS
     #--------------------------------------------------------------------------
     speculative_sacrifice_ratio: float = 0.0    # (Sacrifices with Δeval > 150 vs ≤150) [7]
     material_imbalance_tolerance: float = 0.0   # Max material deficit with maintained advantage
-
-    #--------------------------------------------------------------------------
-    # PHASE-SPECIFIC ACCURACY
-    #--------------------------------------------------------------------------
-    opening_accuracy: float = 0.0               # Engine alignment in first 15 moves [1]
-    endgame_technique: float = 0.0              # Accuracy in theoretical endgames
-
-    #--------------------------------------------------------------------------
-    # NEW STRATEGIC PATTERN FEATURES
-    #--------------------------------------------------------------------------
-    zwischenzug_frequency: float = 0.0        # Intermediate move rate
-    forced_line_creation: float = 0.0         # Moves limiting opponent options
-    combinatorial_novelty: float = 0.0        # Novel move sequences (≥3 consecutive)
-    eco_coverage: float = 0.0                 # % of known ECO lines covered
-    theoretical_pressure: float = 0.0         # Moves forcing opponent from theory
-    opening_system_consistency: float = 0.0   # Reuse of specific opening systems
-    technical_endgame_accuracy: float = 0.0   # Accuracy in theoretical endgames
-    pawn_structure_endurance: float = 0.0     # Pawn structure preservation into endgame
-    endgame_conversion_rate: float = 0.0      # Win rate in endgame-reaching games
-    plan_adaptability: float = 0.0            # Successful strategic shifts per game
-    risk_compensation: float = 0.0            # Eval recovery after inaccuracies
-    positional_redundancy: float = 0.0        # Multiple threats per position
     
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)

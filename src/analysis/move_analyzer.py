@@ -169,44 +169,71 @@ class MoveAnalyzer:
     def is_piece_sacrifice(prev_board: chess.Board, curr_board: chess.Board, move: chess.Move) -> bool:
         """
         Determine if a move was a piece sacrifice
-        A sacrifice is defined as voluntarily giving up material without immediate recapture
+        A sacrifice is defined as voluntarily giving up material without immediate equal or better compensation.
         """
         if not prev_board or not curr_board or not move:
             return False
-            
         try:
             # Check what piece was moved
             piece = prev_board.piece_at(move.from_square)
             if piece is None or piece.piece_type == chess.PAWN:
                 return False
-                
+            
             # Check if a capture happened at the destination
             captured = prev_board.piece_at(move.to_square)
-            
-            # Get actual piece values to compare
             piece_value = MoveAnalyzer.PIECE_VALUES.get(piece.piece_type, 0)
             captured_value = MoveAnalyzer.PIECE_VALUES.get(captured.piece_type, 0) if captured else 0
             
-            # If piece moved to an empty square or captured a significantly lower value piece, check if it's now under attack
-            if captured is None or captured_value < piece_value:
-                # Is the piece now under attack?
-                attackers = curr_board.attackers(not prev_board.turn, move.to_square)
-                if attackers:
-                    # check if legal attackers
-                    legal_attackers = []
-                    for attacker_square in attackers:
-                        attack_move = chess.Move(attacker_square, move.to_square)
-                        if curr_board.is_legal(attack_move):
-                            legal_attackers.append(attack_move)
-                    if not legal_attackers:
-                        return False
-                    
-                    # Is there adequate defense?
-                    defenders = curr_board.attackers(prev_board.turn, move.to_square)
-                    if not defenders or len(legal_attackers) > len(defenders):
-                        return True
+            # If we captured a piece of equal or higher value, it's not a sacrifice
+            if captured and captured_value >= piece_value:
+                return False
             
-            return False
+            # Check if the piece is now under attack
+            attackers = curr_board.attackers(not prev_board.turn, move.to_square)
+            if not attackers:
+                return False  # No attackers means no sacrifice
+            
+            # Check for legal attackers
+            legal_attackers = []
+            for attacker_square in attackers:
+                attack_move = chess.Move(attacker_square, move.to_square)
+                if curr_board.is_legal(attack_move):
+                    legal_attackers.append(attacker_square)
+            
+            if not legal_attackers:
+                return False  # No legal attackers means no sacrifice
+            
+            # Check for defenders
+            defenders = curr_board.attackers(prev_board.turn, move.to_square)
+            
+            # Basic sacrifice check: piece is undefended or underdefended
+            if not defenders or len(defenders) < len(legal_attackers):
+                return True
+            
+            # Check the material value exchange
+            min_attacker_value = float('inf')
+            for attacker_square in legal_attackers:
+                attacker_piece = curr_board.piece_at(attacker_square)
+                attacker_value = MoveAnalyzer.PIECE_VALUES.get(attacker_piece.piece_type, 0)
+                min_attacker_value = min(min_attacker_value, attacker_value)
+            
+            # If our piece is more valuable than the cheapest attacker, it's potentially a sacrifice
+            if piece_value > min_attacker_value:
+                # Check if we have a defender of equal or lesser value than the cheapest attacker
+                has_efficient_defender = False
+                for defender_square in defenders:
+                    defender_piece = curr_board.piece_at(defender_square)
+                    defender_value = MoveAnalyzer.PIECE_VALUES.get(defender_piece.piece_type, 0)
+                    if defender_value <= min_attacker_value:
+                        has_efficient_defender = True
+                        break
+                
+                # If we don't have an efficient defender, it's a sacrifice
+                if not has_efficient_defender:
+                    return True
+            
+            return False  # Not a sacrifice
+            
         except Exception as e:
             logger.warning(f"Error checking for piece sacrifice: {e}")
             return False
@@ -268,12 +295,88 @@ class MoveAnalyzer:
             return False
 
     @staticmethod
+    def _check_great_conditions(
+        prev: Info,
+        curr: Info,
+        prev_board: chess.Board,
+        move: chess.Move,
+        top_moves: List[str],
+        move_difficulty: float = 0.0
+    ) -> Tuple[bool, str]:
+        """
+        Helper method to check if a move should be classified as 'great'.
+        
+        A move is considered great if it meets any of these conditions:
+        1. It's the only good move in a complex position
+        2. It turns a losing position into equal or winning
+        3. It turns an equal position into clearly winning
+        4. It maintains winning advantage in a complex position
+        
+        Args:
+            prev: Position info before the move
+            curr: Position info after the move
+            prev_board: Board state before the move
+            move: The chess move to analyze
+            top_moves: List of top engine moves
+            move_difficulty: Complexity score of the move (0-1)
+            
+        Returns:
+            Tuple[bool, str]: (is_great, reason_message)
+        """
+        # Guard against None values
+        if prev.cp is None or curr.cp is None:
+            return False, ""
+        
+        # Check if this is the only good move
+        is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
+        
+        # Determine if this is a simple capture (capturing an undefended piece)
+        is_simple_capture = False
+        if prev_board:
+            captured_piece = prev_board.piece_at(move.to_square)
+            if captured_piece and not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
+                is_simple_capture = True
+        
+        # Case 1: Difficult and only good move
+        if move_difficulty > 0.3 and is_only_good and not is_simple_capture:
+            return True, f" | GREAT: Only good move in a complex position (complexity={move_difficulty:.2f})"
+        
+        # Case 2: Turns losing into equal/winning
+        # For white (prev.color = True): Turn < -150 CP into > -50 CP
+        # For black (prev.color = False): Turn > +150 CP into < +50 CP
+        if ((prev.color and prev.cp < -150 and curr.cp > -50) or 
+            (not prev.color and prev.cp > 150 and curr.cp < 50)):
+            return True, f" | GREAT: Turns losing position into equal/winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
+        
+        # Case 3: Turns equal into clearly winning
+        # For white (prev.color = True): Turn ±50 CP into > +200 CP
+        # For black (prev.color = False): Turn ±50 CP into < -200 CP
+        if ((prev.color and abs(prev.cp) < 50 and curr.cp > 200) or 
+            (not prev.color and abs(prev.cp) < 50 and curr.cp < -200)):
+            return True, f" | GREAT: Turns equal position into clearly winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
+        
+        # Case 4: Maintains winning advantage in complex position
+        # Only counts for difficult positions that aren't simple captures
+        if (move_difficulty > 0.4 and not is_simple_capture and 
+            ((prev.color and prev.cp > 200 and curr.cp > 180) or 
+            (not prev.color and prev.cp < -200 and curr.cp < -180))):
+            return True, f" | GREAT: Maintains winning advantage in complex position (complexity={move_difficulty:.2f})"
+        
+        return False, ""
+
+    @staticmethod
     def move_complexity(prev_board: chess.Board, move: chess.Move) -> float:
         """
-        Calculate the complexity/difficulty of finding a move
+        Calculate the complexity/difficulty of finding a move.
         
+        Higher scores indicate more complex moves that are harder to find.
+        
+        Args:
+            prev_board: The board state before the move
+            move: The chess move to analyze
+            
         Returns:
-            Complexity score (0-1), where higher means more complex
+            float: Complexity score (0-1), where higher means more complex
         """
         if not prev_board or not move:
             return 0.0
@@ -285,101 +388,136 @@ class MoveAnalyzer:
             after_board = prev_board.copy()
             after_board.push(move)
             
-            # Factor 1: Tactical factors
+            # Get piece information up front to avoid repeated lookups
+            moving_piece = prev_board.piece_at(move.from_square)
+            captured_piece = prev_board.piece_at(move.to_square)
             
-            # 1.1: Is it a sacrifice? (sacrifices are complex)
+            if not moving_piece:
+                return 0.0  # Can't analyze a move without a piece
+            
+            piece_type = moving_piece.piece_type
+            distance = chess.square_distance(move.from_square, move.to_square)
+            destination_rank = chess.square_rank(move.to_square)
+            destination_file = chess.square_file(move.to_square)
+            game_stage = len(prev_board.move_stack)
+            
+            # === TACTICAL FACTORS ===
+            
+            # Sacrifices (greatly increases complexity)
             if MoveAnalyzer.is_piece_sacrifice(prev_board, after_board, move):
                 complexity += 0.4
-                
-            # 1.2: Captures (with evaluation)
-            captured_piece = prev_board.piece_at(move.to_square)
-            moving_piece = prev_board.piece_at(move.from_square)
+            
+            # Captures with evaluation
             if captured_piece:
-                # If capturing with a less valuable piece (or equal), it's usually obvious
-                if moving_piece and MoveAnalyzer.PIECE_VALUES[moving_piece.piece_type] <= MoveAnalyzer.PIECE_VALUES[captured_piece.piece_type]:
+                moving_value = MoveAnalyzer.PIECE_VALUES[piece_type]
+                captured_value = MoveAnalyzer.PIECE_VALUES[captured_piece.piece_type]
+                
+                # Capturing with less/equal valuable piece (usually obvious)
+                if moving_value <= captured_value:
                     complexity -= 0.15
-                # If the captured piece is hanging (undefended), it's obvious
+                    
+                # Capturing undefended pieces (obvious)
                 if not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
                     complexity -= 0.25
-                # If capturing with a more valuable piece, might be complex
-                elif moving_piece and MoveAnalyzer.PIECE_VALUES[moving_piece.piece_type] > MoveAnalyzer.PIECE_VALUES[captured_piece.piece_type]:
+                    
+                # Capturing with more valuable piece (sometimes complex)
+                elif moving_value > captured_value:
                     complexity += 0.1
             
-            # 1.3: Checks (checks can be simple, but some are complex)
+            # Check detection
             if after_board.is_check():
-                # Discovered checks are complex
-                if prev_board.is_attacked_by(prev_board.turn, move.to_square) and not move.from_square == move.to_square:
+                # Discovered checks are complex and impressive
+                piece_gives_check = False
+                # Create a board where only the moved piece exists
+                check_test_board = chess.Board(None)
+                check_test_board.set_piece_at(move.to_square, moving_piece)
+                check_test_board.set_piece_at(after_board.king(not prev_board.turn), chess.Piece(chess.KING, not prev_board.turn))
+                
+                # If the moved piece is directly checking, it's a direct check
+                if check_test_board.is_check():
+                    piece_gives_check = True
+                    
+                if not piece_gives_check:
+                    # It's a discovered check (more complex)
                     complexity += 0.3
                 else:
                     # Direct checks are generally more obvious
                     complexity -= 0.1
             
-            # Factor 2: Piece-specific considerations
+            # === PIECE-SPECIFIC CONSIDERATIONS ===
             
-            # 2.1: Knight moves are generally less intuitive
-            if moving_piece and moving_piece.piece_type == chess.KNIGHT:
+            # Knight moves (less intuitive patterns)
+            if piece_type == chess.KNIGHT:
                 complexity += 0.15
-                
-            # 2.2: Queen, rook and bishop long-range moves can be complex
-            if moving_piece:
-                distance = chess.square_distance(move.from_square, move.to_square)
-                if moving_piece.piece_type in [chess.QUEEN, chess.ROOK, chess.BISHOP] and distance > 3:
-                    complexity += 0.2
-                    
-            # 2.3: Pawn moves
-            if moving_piece and moving_piece.piece_type == chess.PAWN:
-                # Pawn promotions are usually obvious
-                if chess.square_rank(move.to_square) in [0, 7]:
+            
+            # Long-range piece moves
+            if piece_type in [chess.QUEEN, chess.ROOK, chess.BISHOP] and distance > 3:
+                complexity += 0.2
+            
+            # Pawn moves evaluation
+            if piece_type == chess.PAWN:
+                # Promotions are usually obvious
+                if destination_rank in [0, 7]:
                     complexity -= 0.2
-                # Quiet pawn moves in the middlegame can be strategic and complex
-                elif not captured_piece and 2 <= chess.square_rank(move.to_square) <= 5:
+                    
+                # Quiet pawn moves in middlegame can be strategic
+                elif not captured_piece and 2 <= destination_rank <= 5:
                     complexity += 0.1
+                    
+                # Pawn captures are usually obvious
+                elif captured_piece:
+                    complexity -= 0.05
             
-            # Factor 3: Strategic factors
+            # === STRATEGIC FACTORS ===
             
-            # 3.1: Moving to squares under attack is complex (unless capturing)
+            # Moving to attacked squares (without capturing) is complex
             if after_board.is_attacked_by(not prev_board.turn, move.to_square) and not captured_piece:
                 complexity += 0.25
-                
-            # 3.2: Moving away from attacked squares is more obvious
+            
+            # Moving away from attacked squares is reactive and obvious
             if prev_board.is_attacked_by(not prev_board.turn, move.from_square):
                 complexity -= 0.2
-                
-            # 3.3: Moving to outposts or strategic squares
-            destination_rank = chess.square_rank(move.to_square)
-            destination_file = chess.square_file(move.to_square)
             
-            # Center control is more obvious in early game
-            if len(prev_board.move_stack) < 20 and 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
+            # Board geography considerations
+            if game_stage < 20 and 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
+                # Center control in early game is standard
                 complexity -= 0.1
-            # Edge maneuvers can be complex
             elif destination_rank in [0, 7] or destination_file in [0, 7]:
+                # Edge/corner maneuvers can be complex
                 complexity += 0.1
             
-            # 3.4: King safety
-            if moving_piece and moving_piece.piece_type == chess.KING:
-                # King moves in the middlegame are often complex (except castling)
-                if not prev_board.is_castling(move) and 8 < len(prev_board.move_stack) < 40:
-                    complexity += 0.3
+            # King safety considerations
+            if piece_type == chess.KING:
                 # Castling is generally obvious
-                elif prev_board.is_castling(move):
+                if prev_board.is_castling(move):
                     complexity -= 0.2
+                # King moves in middlegame are often complex
+                elif 8 < game_stage < 40:
+                    complexity += 0.3
             
-            # Factor 4: Tempo and development
+            # === TEMPO AND DEVELOPMENT ===
             
-            # 4.1: Development moves in the opening are obvious
-            if len(prev_board.move_stack) < 15:
-                if (moving_piece and moving_piece.piece_type in [chess.KNIGHT, chess.BISHOP] and 
+            # Development in opening
+            if game_stage < 15:
+                # Standard development moves are obvious
+                if (piece_type in [chess.KNIGHT, chess.BISHOP] and 
                     chess.square_rank(move.from_square) in [0, 1, 6, 7] and
                     chess.square_rank(move.to_square) not in [0, 1, 6, 7]):
                     complexity -= 0.2
-            
-            # 4.2: Non-developing moves in the opening can be complex
-            if len(prev_board.move_stack) < 10:
-                if moving_piece and moving_piece.piece_type in [chess.QUEEN, chess.ROOK]:
+                    
+                # Early queen/rook development is unusual
+                if piece_type in [chess.QUEEN, chess.ROOK] and game_stage < 10:
                     complexity += 0.15
             
-            # Ensure complexity is within bounds
+            # === ENDGAME SPECIFIC ===
+            
+            # Endgame king activity
+            if game_stage > 40 and piece_type == chess.KING:
+                # Active king in endgame is standard
+                if 2 <= destination_rank <= 5 and 2 <= destination_file <= 5:
+                    complexity -= 0.15
+            
+            # Ensure complexity is within bounds [0.0, 1.0]
             return max(0.0, min(1.0, complexity))
         except Exception as e:
             logger.warning(f"Error calculating move complexity: {e}")
@@ -408,52 +546,7 @@ class MoveAnalyzer:
                 return True, " | BRILLIANT: Good piece sacrifice from non-winning position"
                 
         return False, ""
-        
-    @staticmethod
-    def _check_great_conditions(
-        prev: Info,
-        curr: Info,
-        prev_board: chess.Board,
-        move: chess.Move,
-        top_moves: List[str],
-        move_difficulty: float = 0.0
-    ) -> Tuple[bool, str]:
-        """Helper method to check great move conditions"""
-        if prev.cp is None or curr.cp is None:
-            return False, ""
-            
-        is_only_good = MoveAnalyzer.is_only_good_move(prev_board, move, top_moves, prev)
-        
-        # Check if this is a simple capture
-        is_simple_capture = False
-        if prev_board:
-            captured_piece = prev_board.piece_at(move.to_square)
-            if captured_piece and not prev_board.is_attacked_by(not prev_board.turn, move.to_square):
-                # If capturing an undefended piece, it's a simple capture
-                is_simple_capture = True
-        
-        # Case 1: Difficult and only good move
-        if move_difficulty > 0.3 and is_only_good and not is_simple_capture:
-            return True, f" | GREAT: Only good move in a complex position (complexity={move_difficulty:.2f})"
-        
-        # Case 2: Turns losing into equal/winning
-        if (prev.color and prev.cp < -150 and curr.cp > -50) or \
-           (not prev.color and prev.cp > 150 and curr.cp < 50):
-            return True, f" | GREAT: Turns losing position into equal/winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
-        
-        # Case 3: Turns equal into clearly winning
-        if (prev.color and abs(prev.cp) < 50 and curr.cp > 200) or \
-           (not prev.color and abs(prev.cp) < 50 and curr.cp < -200):
-            return True, f" | GREAT: Turns equal position into clearly winning (prev_cp={prev.cp}, curr_cp={curr.cp})"
-        
-        # Case 4: Maintains winning advantage in complex position
-        if move_difficulty > 0.4 and not is_simple_capture and \
-           ((prev.color and prev.cp > 200 and curr.cp > 180) or \
-            (not prev.color and prev.cp < -200 and curr.cp < -180)):
-            return True, f" | GREAT: Maintains winning advantage in complex position (complexity={move_difficulty:.2f})"
-            
-        return False, ""
-        
+              
     @staticmethod
     def analyze_move_with_top_moves(
         prev: Info, 

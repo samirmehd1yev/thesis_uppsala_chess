@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Chess Game Feature Extraction Script
 
@@ -42,7 +41,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler("chess_feature_extraction.log"),
+        logging.FileHandler("../logs/chess_feature_extraction.log"),
         logging.StreamHandler(sys.stdout)
     ]
 )
@@ -55,12 +54,96 @@ OUTPUT_CSV = "../data/processed/lumbrasgigabase/chess_games_with_features.csv"
 class GameFeatureExtractor:
     """Class to extract features from evaluated chess games."""
     
-    def __init__(self):
+    def __init__(self, wdl_engine="lc0"):
+        """
+        Initialize the feature extractor with engine options.
+        
+        Args:
+            wdl_engine: Engine to use for WDL calculations. Options: "lc0" or "sf"
+        """
         self.feature_extractor = FeatureExtractor()
-        self.sharpness_analyzer = WdlSharpnessAnalyzer()
+        self.wdl_engine = wdl_engine
+        
+        # Initialize sharpness analyzer based on the selected engine
+        if wdl_engine.lower() == "lc0":
+            self.logger = logging.getLogger('chess_feature_extraction')
+            self.logger.info("Using Leela Chess Zero for WDL calculations")
+            self.sharpness_analyzer = WdlSharpnessAnalyzer(nodes=10000)
+        elif wdl_engine.lower() == "sf":
+            self.logger = logging.getLogger('chess_feature_extraction')
+            self.logger.info("Using Stockfish for WDL calculations")
+            # For Stockfish WDL, we'll use the chess.engine.Score WDL model
+            # Create a partial sharpness analyzer that only has the calculate_sharpness method
+            from types import SimpleNamespace
+            self.sharpness_analyzer = SimpleNamespace(
+                calculate_sharpness=self._calculate_sharpness_from_wdl
+            )
+        else:
+            raise ValueError(f"Unknown WDL engine: {wdl_engine}. Use 'lc0' or 'sf'.")
+            
         # Load ECO database for opening identification
         self.eco_loader = eco_loader  # Use the singleton instance
     
+    def _calculate_sharpness_from_wdl(self, board, wdl):
+        """
+        Calculate sharpness score using the same formula as in WdlSharpnessAnalyzer.
+        
+        Args:
+            board: Chess board position
+            wdl: Tuple of (win, draw, loss) probabilities in range 0-1
+            
+        Returns:
+            Float representing the sharpness score
+        """
+        # Use the same formula as in WdlSharpnessAnalyzer
+        W = min(max(wdl[0], 0.0001), 0.9999)
+        L = min(max(wdl[2], 0.0001), 0.9999)
+        
+        try:
+            return (max(2/(np.log((1/W)-1) + np.log((1/L)-1)), 0))**2
+        except Exception as e:
+            self.logger.error(f"Error calculating sharpness: {e}")
+            return 0.0
+            
+    def calculate_cumulative_sharpness(self, sharpness_scores):
+        """
+        Calculate cumulative sharpness over positions.
+        Same logic as WdlSharpnessAnalyzer.calculate_cumulative_sharpness.
+        
+        Args:
+            sharpness_scores: List of sharpness score dictionaries
+            
+        Returns:
+            Dictionary with cumulative sharpness scores
+        """
+        if not sharpness_scores:
+            return {'sharpness': 0.0, 'white_sharpness': 0.0, 'black_sharpness': 0.0}
+        
+        # Separate scores for white and black positions
+        white_positions = []
+        black_positions = []
+        
+        for i, score in enumerate(sharpness_scores):
+            # Even ply numbers (0, 2, 4...) are positions where it's White's turn to move
+            # Odd ply numbers (1, 3, 5...) are positions where it's Black's turn to move
+            if i % 2 == 0:
+                white_positions.append(score.get('sharpness', 0.0))
+            else:
+                black_positions.append(score.get('sharpness', 0.0))
+        
+        # Calculate cumulative values
+        white_cumulative = sum(white_positions)
+        black_cumulative = sum(black_positions)
+        
+        # Overall cumulative is the sum of white and black cumulative values
+        overall_cumulative = white_cumulative + black_cumulative
+        
+        return {
+            'sharpness': overall_cumulative,
+            'white_sharpness': white_cumulative,
+            'black_sharpness': black_cumulative
+        }
+
     def parse_eval_list(self, eval_str):
         """
         Parse the compact evaluations from string representation to a list.
@@ -145,7 +228,7 @@ class GameFeatureExtractor:
                     "losses": wdl.losses / 1000.0
                 }
         except Exception as e:
-            logger.error(f"Error calculating WDL: {e}")
+            self.logger.error(f"Error calculating WDL: {e}")
         
         return result
 
@@ -274,8 +357,46 @@ class GameFeatureExtractor:
         
         for i, (board, eval_info) in enumerate(zip(positions, evals)):
             if board and eval_info:
-                sharpness = self.sharpness_analyzer.calculate_position_sharpness(board, eval_info)
-                sharpness_scores.append(sharpness)
+                if self.wdl_engine.lower() == "lc0":
+                    # Use LC0 for WDL and sharpness calculation
+                    sharpness = self.sharpness_analyzer.calculate_position_sharpness(board, eval_info)
+                    sharpness_scores.append(sharpness)
+                else:
+                    # Use Stockfish WDL model 
+                    if hasattr(eval_info, 'eval') and eval_info.eval:
+                        # Calculate WDL using chess.engine.Score
+                        wdl_dict = self.cp_to_wdl(eval_info.eval, i)
+                        
+                        # Calculate sharpness
+                        wins = wdl_dict.get('wins', 0)
+                        draws = wdl_dict.get('draws', 0)
+                        losses = wdl_dict.get('losses', 0)
+                        
+                        if self.sharpness_analyzer:
+                            # If we have a sharpness analyzer, use it
+                            sharpness = self.sharpness_analyzer.calculate_sharpness(board, (wins, draws, losses))
+                        else:
+                            # Otherwise use a basic entropy-based formula
+                            W = min(max(wins, 0.0001), 0.9999)
+                            L = min(max(losses, 0.0001), 0.9999)
+                            try:
+                                sharpness = (max(2/(np.log((1/W)-1) + np.log((1/L)-1)), 0))**2
+                                # print(f"Sharpness: {sharpness}")
+                            except:
+                                # print(f"Error calculating sharpness: {e}")
+                                sharpness = 0.0
+                        
+                        # Create result dict
+                        result = {
+                            'sharpness': sharpness,
+                            'white_sharpness': sharpness if board.turn == chess.WHITE else 0.0,
+                            'black_sharpness': sharpness if board.turn == chess.BLACK else 0.0
+                        }
+                        
+                        sharpness_scores.append(result)
+                    else:
+                        # Default values for missing evaluations
+                        sharpness_scores.append({'sharpness': 0.0, 'white_sharpness': 0.0, 'black_sharpness': 0.0})
             else:
                 # Default values for missing positions/evaluations
                 sharpness_scores.append({'sharpness': 0.0, 'white_sharpness': 0.0, 'black_sharpness': 0.0})
@@ -566,7 +687,7 @@ class GameFeatureExtractor:
             
             # Calculate sharpness scores
             sharpness_scores = self.calculate_position_sharpness(positions, info_objects)
-            cumulative_sharpness = self.sharpness_analyzer.calculate_cumulative_sharpness(sharpness_scores)
+            cumulative_sharpness = self.calculate_cumulative_sharpness(sharpness_scores)
             
             # Calculate move accuracies
             move_accuracies = self.calculate_move_accuracies(positions, info_objects, mainline_moves)
@@ -577,14 +698,14 @@ class GameFeatureExtractor:
             )
             
             # Calculate move statistics
-            capture_freq_white, capture_freq_black, check_freq_white, check_freq_black, castle_move_white, castle_move_black = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
+            capture_freq_white, capture_freq_black, check_freq_white, check_freq_black, white_castle_move, black_castle_move = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
             
             # Calculate opening novelty score and get opening information
             opening_novelty_score, eco_code, opening_name, matching_plies = self.calculate_opening_novelty_score(game, features, game_row.get('eco'))
             features.opening_novelty_score = opening_novelty_score
             features.opening_name = opening_name
             features.eco = eco_code  # Store the matched ECO code
-            features.matching_plies = matching_plies  # Store the matching plies for accurate deviation calculation
+            # features.matching_plies = matching_plies  # Store the matching plies for accurate deviation calculation
             
             # Update accuracy values in features
             features.white_accuracy = white_accuracy
@@ -602,17 +723,16 @@ class GameFeatureExtractor:
                 result[key] = value
             
             # Add summary sharpness metrics
-            result['overall_sharpness'] = cumulative_sharpness['sharpness']
             result['white_sharpness'] = cumulative_sharpness['white_sharpness']
             result['black_sharpness'] = cumulative_sharpness['black_sharpness']
             
             # Add move statistics
-            result['capture_frequency_white'] = capture_freq_white
-            result['capture_frequency_black'] = capture_freq_black
-            result['check_frequency_white'] = check_freq_white
-            result['check_frequency_black'] = check_freq_black
-            result['castle_move_white'] = castle_move_white
-            result['castle_move_black'] = castle_move_black
+            result['white_capture_frequency'] = capture_freq_white
+            result['black_capture_frequency'] = capture_freq_black
+            result['white_check_frequency'] = check_freq_white
+            result['black_check_frequency'] = check_freq_black
+            result['white_castle_move'] = white_castle_move
+            result['black_castle_move'] = black_castle_move
             
             # Add ECO code if not already in the data
             if not result.get('eco') and eco_code:
@@ -653,6 +773,8 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Print detailed debug information like in test.py')
     parser.add_argument('--input', type=str, default=INPUT_CSV, help='Input CSV file path')
     parser.add_argument('--output', type=str, default=OUTPUT_CSV, help='Output CSV file path')
+    parser.add_argument('--wdl', type=str, choices=['lc0', 'sf'], default='lc0',
+                        help='Engine to use for WDL calculations: lc0 (Leela Chess Zero) or sf (Stockfish)')
     args = parser.parse_args()
     
     start_time = datetime.now()
@@ -663,8 +785,8 @@ def main():
         logger.setLevel(logging.DEBUG)
         logger.info("Debug mode enabled - verbose logging activated")
     
-    # Initialize the feature extractor
-    extractor = GameFeatureExtractor()
+    # Initialize the feature extractor with the selected WDL engine
+    extractor = GameFeatureExtractor(wdl_engine=args.wdl)
     
     # Read input CSV
     input_csv = args.input
@@ -874,7 +996,7 @@ def print_opening_summary(features, game_data):
     novelty_score = features.get('opening_novelty_score', 0.0)
     
     # Get the matching plies directly from features if available
-    matching_plies = features.get('matching_plies', 0)
+    # matching_plies = features.get('matching_plies', 0)
     
     # Calculate how many moves matched theory before deviation
     # The novelty score is the ratio of matching moves to total opening moves
@@ -895,15 +1017,15 @@ def print_opening_summary(features, game_data):
         else:
             # Calculate the deviation point in terms of move number and player
             # Use the stored matching_plies if available, otherwise estimate from matching_moves
-            if matching_plies > 0:
-                # Use the actual matching plies from the feature extractor
-                actual_matching_plies = matching_plies
-            else:
-                # Fallback calculation if matching_plies not provided
-                actual_matching_plies = matching_moves * 2
+            # if matching_plies > 0:
+            #     # Use the actual matching plies from the feature extractor
+            #     actual_matching_plies = matching_plies
+            # else:
+            #     # Fallback calculation if matching_plies not provided
+            #     actual_matching_plies = matching_moves * 2
             
             # Add 1 to get the deviation ply (1-indexed)
-            deviation_ply = actual_matching_plies + 1
+            deviation_ply = matching_moves + 1
             
             # Calculate whether it's White's or Black's move at the deviation point
             is_white_deviation = (deviation_ply % 2 == 1)
@@ -954,9 +1076,8 @@ def print_game_analysis(result, game_data):
     print_opening_summary(result, game_data)
     
     # Print sharpness summary if available
-    if 'overall_sharpness' in result and 'white_sharpness' in result and 'black_sharpness' in result:
+    if  'white_sharpness' in result and 'black_sharpness' in result:
         print_sharpness_summary({
-            'sharpness': result['overall_sharpness'],
             'white_sharpness': result['white_sharpness'],
             'black_sharpness': result['black_sharpness']
         })
@@ -965,7 +1086,7 @@ def print_game_analysis(result, game_data):
     print_accuracy_summary(result)
     
     # Print move statistics if available
-    if 'capture_frequency_white' in result or 'capture_frequency_black' in result:
+    if 'white_capture_frequency' in result or 'black_capture_frequency' in result:
         print_move_statistics(result)
     
     # Print feature summary
@@ -995,21 +1116,21 @@ def print_feature_summary(features):
             "total_moves", "opening_length", "middlegame_length", "endgame_length"
         ],
         "Opening Development": [
-            "opening_novelty_score", "opening_name", "minor_piece_development_white", "minor_piece_development_black", 
-            "queen_development_white", "queen_development_black"
+            "opening_novelty_score", "opening_name", "white_minor_piece_development", "black_minor_piece_development", 
+            "white_queen_development", "black_queen_development"
         ],
         "Material Dynamics": [
             "white_material_changes", "black_material_changes", "material_balance_std",
-            "material_volatility_white", "material_volatility_black"
+            "white_material_volatility", "black_material_volatility"
         ],
         "Exchange Rates": [
-            "piece_exchange_rate_white", "piece_exchange_rate_black",
-            "pawn_exchange_rate_white", "pawn_exchange_rate_black"
+            "white_piece_exchange_rate", "black_piece_exchange_rate",
+            "white_pawn_exchange_rate", "black_pawn_exchange_rate"
         ],
         "Positional Control": [
             "white_piece_mobility_avg", "black_piece_mobility_avg",
             "white_center_control_avg", "black_center_control_avg",
-            "space_advantage_white", "space_advantage_black"
+            "white_space_advantage", "black_space_advantage",
         ],
         "King Safety": [
             "white_king_safety", "black_king_safety",
@@ -1035,10 +1156,10 @@ def print_feature_summary(features):
             "black_opening_accuracy", "black_middlegame_accuracy", "black_endgame_accuracy"
         ],
         "Move Statistics - White": [
-            "capture_frequency_white", "check_frequency_white", "castle_move_white"
+            "white_capture_frequency", "white_check_frequency", "white_castle_move"
         ],
         "Move Statistics - Black": [
-            "capture_frequency_black", "check_frequency_black", "castle_move_black"
+            "black_capture_frequency", "black_check_frequency", "black_castle_move"
         ]
     }
     
@@ -1175,15 +1296,12 @@ def print_sharpness_summary(cumulative_sharpness):
         else:
             return Fore.BLUE  # Not sharp
     
-    overall = cumulative_sharpness.get('sharpness', 0)
     white = cumulative_sharpness.get('white_sharpness', 0)
     black = cumulative_sharpness.get('black_sharpness', 0)
     
-    print(f"  Overall Sharpness: {sharpness_color(overall)}{overall:.1f}{Style.RESET_ALL}")
     print(f"  White Sharpness: {sharpness_color(white)}{white:.1f}{Style.RESET_ALL}")
     print(f"  Black Sharpness: {sharpness_color(black)}{black:.1f}{Style.RESET_ALL}")
 
-# Add a new function to print move statistics
 def print_move_statistics(result):
     """Print move statistics like captures, checks, and castling"""
     try:
@@ -1204,34 +1322,57 @@ def print_move_statistics(result):
     print("="*80)
     
     # Print capture frequency for white and black
-    if 'capture_frequency_white' in result:
-        capture_freq_white = result['capture_frequency_white']
+    if 'white_capture_frequency' in result:
+        capture_freq_white = result['white_capture_frequency']
         print(f"  White Capture Frequency: {capture_freq_white:.2f}")
     
-    if 'capture_frequency_black' in result:
-        capture_freq_black = result['capture_frequency_black']
+    if 'black_capture_frequency' in result:
+        capture_freq_black = result['black_capture_frequency']
         print(f"  Black Capture Frequency: {capture_freq_black:.2f}")
     
     # Print check frequency for white and black
-    if 'check_frequency_white' in result:
-        check_freq_white = result['check_frequency_white']
+    if 'white_check_frequency' in result:
+        check_freq_white = result['white_check_frequency']
         print(f"  White Check Frequency: {check_freq_white:.2f}")
     
-    if 'check_frequency_black' in result:
-        check_freq_black = result['check_frequency_black']
+    if 'black_check_frequency' in result:
+        check_freq_black = result['black_check_frequency']
         print(f"  Black Check Frequency: {check_freq_black:.2f}")
     
+    # Print prophylactic move frequency for white and black
+    if 'white_prophylactic_frequency' in result:
+        white_prophylactic = result['white_prophylactic_frequency']
+        print(f"  White Prophylactic Frequency: {white_prophylactic:.2f}")
+    
+    if 'black_prophylactic_frequency' in result:
+        black_prophylactic = result['black_prophylactic_frequency']
+        print(f"  Black Prophylactic Frequency: {black_prophylactic:.2f}")
+    
     # Print castling timing using actual move numbers
-    if 'castle_move_white' in result:
-        castle_white = result['castle_move_white']
-        if castle_white > 0:
+    if 'white_castle_move' in result:
+        castle_white = result['white_castle_move']
+        if isinstance(castle_white, float) and castle_white > 0:
+            total_moves = result.get('total_moves', 0)
+            if total_moves > 0:
+                castle_move_number = int(castle_white * total_moves)
+                print(f"  White Castling: Move {castle_move_number} ({castle_white:.2f} of game)")
+            else:
+                print(f"  White Castling: {castle_white:.2f} of game")
+        elif castle_white > 0:
             print(f"  White Castling: Move {castle_white}")
         else:
             print(f"  White Castling: Did not castle")
     
-    if 'castle_move_black' in result:
-        castle_black = result['castle_move_black']
-        if castle_black > 0:
+    if 'black_castle_move' in result:
+        castle_black = result['black_castle_move']
+        if isinstance(castle_black, float) and castle_black > 0:
+            total_moves = result.get('total_moves', 0)
+            if total_moves > 0:
+                castle_move_number = int(castle_black * total_moves)
+                print(f"  Black Castling: Move {castle_move_number} ({castle_black:.2f} of game)")
+            else:
+                print(f"  Black Castling: {castle_black:.2f} of game")
+        elif castle_black > 0:
             print(f"  Black Castling: Move {castle_black}")
         else:
             print(f"  Black Castling: Did not castle")

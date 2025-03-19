@@ -64,43 +64,43 @@ class FeatureExtractor:
         
         # Calculate development metrics - new
         moves_list = list(game.mainline_moves())
-        minor_piece_development_white, minor_piece_development_black, \
-        queen_development_white, queen_development_black = self._calculate_development_metrics(positions, moves_list)
+        white_minor_piece_development, black_minor_piece_development, \
+        white_queen_development, black_queen_development = self._calculate_development_metrics(positions, moves_list)
         
         # Normalize development metrics by total moves
-        features.minor_piece_development_white = minor_piece_development_white / total_moves if total_moves > 0 else 0.0
-        features.minor_piece_development_black = minor_piece_development_black / total_moves if total_moves > 0 else 0.0
-        features.queen_development_white = queen_development_white / total_moves if total_moves > 0 else 0.0
-        features.queen_development_black = queen_development_black / total_moves if total_moves > 0 else 0.0
+        features.white_minor_piece_development = white_minor_piece_development / total_moves if total_moves > 0 else 0.0
+        features.black_minor_piece_development = black_minor_piece_development / total_moves if total_moves > 0 else 0.0
+        features.white_queen_development = white_queen_development / total_moves if total_moves > 0 else 0.0
+        features.black_queen_development = black_queen_development / total_moves if total_moves > 0 else 0.0
         
         # Calculate engine move alignment - new
         if evals and len(evals) > 1:
-            top_move_alignment_white, top_move_alignment_black, top2_3_move_alignment_white, top2_3_move_alignment_black = self._calculate_engine_move_alignment(moves_list, evals)
+            white_top_move_alignment, black_top_move_alignment, white_top2_3_move_alignment, black_top2_3_move_alignment = self._calculate_engine_move_alignment(moves_list, evals)
             
-            features.top_move_alignment_white = top_move_alignment_white
-            features.top_move_alignment_black = top_move_alignment_black
-            features.top2_3_move_alignment_white = top2_3_move_alignment_white
-            features.top2_3_move_alignment_black = top2_3_move_alignment_black
+            features.white_top_move_alignment = white_top_move_alignment
+            features.black_top_move_alignment = black_top_move_alignment
+            features.white_top2_3_move_alignment = white_top2_3_move_alignment
+            features.black_top2_3_move_alignment = black_top2_3_move_alignment
         
         # Calculate material features - new addition
-        material_volatility_white, material_volatility_black, material_balance_std, piece_exchange_rate_white, piece_exchange_rate_black, pawn_exchange_rate_white, pawn_exchange_rate_black = self._calculate_material_features(positions)
-        # print(f"Material volatility white: {material_volatility_white}, Material volatility black: {material_volatility_black}, Material balance std: {material_balance_std}, Piece exchange rate white: {piece_exchange_rate_white}, Piece exchange rate black: {piece_exchange_rate_black}, Pawn exchange rate white: {pawn_exchange_rate_white}, Pawn exchange rate black: {pawn_exchange_rate_black}")
-        features.material_volatility_white = material_volatility_white
-        features.material_volatility_black = material_volatility_black
+        white_material_volatility, black_material_volatility, material_balance_std, white_piece_exchange_rate, black_piece_exchange_rate, white_pawn_exchange_rate, black_pawn_exchange_rate = self._calculate_material_features(positions)
+        # print(f"Material volatility white: {white_material_volatility}, Material volatility black: {black_material_volatility}, Material balance std: {material_balance_std}, Piece exchange rate white: {white_piece_exchange_rate}, Piece exchange rate black: {black_piece_exchange_rate}, Pawn exchange rate white: {white_pawn_exchange_rate}, Pawn exchange rate black: {black_pawn_exchange_rate}")
+        features.white_material_volatility = white_material_volatility
+        features.black_material_volatility = black_material_volatility
         features.material_balance_std = material_balance_std
-        features.piece_exchange_rate_white = piece_exchange_rate_white
-        features.piece_exchange_rate_black = piece_exchange_rate_black
-        features.pawn_exchange_rate_white = pawn_exchange_rate_white
-        features.pawn_exchange_rate_black = pawn_exchange_rate_black
+        features.white_piece_exchange_rate = white_piece_exchange_rate
+        features.black_piece_exchange_rate = black_piece_exchange_rate
+        features.white_pawn_exchange_rate = white_pawn_exchange_rate
+        features.black_pawn_exchange_rate = black_pawn_exchange_rate
         
         # Calculate position control features - new addition
-        space_advantage_white, space_advantage_black, \
-        pawn_control_white, pawn_control_black = self._calculate_position_control_features(positions)
+        white_space_advantage, black_space_advantage, \
+        white_pawn_control, black_pawn_control = self._calculate_position_control_features(positions)
         
-        features.space_advantage_white = space_advantage_white
-        features.space_advantage_black = space_advantage_black
-        features.pawn_control_white = pawn_control_white
-        features.pawn_control_black = pawn_control_black
+        features.white_space_advantage = white_space_advantage
+        features.black_space_advantage = black_space_advantage
+        features.white_pawn_control = white_pawn_control
+        features.black_pawn_control = black_pawn_control
         
         # King safety features - new addition
         king_safety_metrics = self._calculate_king_safety(positions)
@@ -116,15 +116,15 @@ class FeatureExtractor:
         # Move statistics
         # Convert mainline_moves to a list before passing to _calculate_move_statistics
         moves_list = list(game.mainline_moves())
-        capture_frequency_white, capture_frequency_black, check_frequency_white, check_frequency_black, castle_move_white, castle_move_black = self._calculate_move_statistics(positions, moves_list)
-        features.capture_frequency_white = capture_frequency_white
-        features.capture_frequency_black = capture_frequency_black
-        features.check_frequency_white = check_frequency_white
-        features.check_frequency_black = check_frequency_black
+        white_capture_frequency, black_capture_frequency, white_check_frequency, black_check_frequency, white_castle_move, black_castle_move = self._calculate_move_statistics(positions, moves_list)
+        features.white_capture_frequency = white_capture_frequency
+        features.black_capture_frequency = black_capture_frequency
+        features.white_check_frequency = white_check_frequency
+        features.black_check_frequency = black_check_frequency
         
         # Normalize castling move numbers by total moves
-        features.castle_move_white = castle_move_white / total_moves if total_moves > 0 else 0.0
-        features.castle_move_black = castle_move_black / total_moves if total_moves > 0 else 0.0
+        features.white_castle_move = white_castle_move / total_moves if total_moves > 0 else 0.0
+        features.black_castle_move = black_castle_move / total_moves if total_moves > 0 else 0.0
         
         # Calculate quality metrics if evaluations available
         if evals and len(evals) > 1:
@@ -161,6 +161,12 @@ class FeatureExtractor:
                 features.black_mistake_count /= total_moves
                 features.black_blunder_count /= total_moves
                 features.black_sacrifice_count /= total_moves
+        
+        # Calculate prophylactic move frequencies
+        moves_list = list(game.mainline_moves())
+        white_prophylactic_frequency, black_prophylactic_frequency = self._calculate_prophylactic_moves(positions, moves_list)
+        features.white_prophylactic_frequency = white_prophylactic_frequency
+        features.black_prophylactic_frequency = black_prophylactic_frequency
         
         return features
     
@@ -494,8 +500,8 @@ class FeatureExtractor:
             if prev_black_pawns != curr_black_pawns:
                 black_changes += 1
                 
-        white_change_rate = white_changes / (len(positions) - 1)
-        black_change_rate = black_changes / (len(positions) - 1)
+        white_change_rate = white_changes / (len(positions) - 1) if len(positions) > 1 else 0
+        black_change_rate = black_changes / (len(positions) - 1) if len(positions) > 1 else 0
         
         return white_change_rate, black_change_rate
     
@@ -683,27 +689,27 @@ class FeatureExtractor:
         
         # Calculate final metrics
         # Use max(1, len()) to avoid division by zero
-        material_volatility_white = sum(white_material_changes) / max(1, len(white_material_changes))
-        material_volatility_black = sum(black_material_changes) / max(1, len(black_material_changes))
+        white_material_volatility = sum(white_material_changes) / max(1, len(white_material_changes))
+        black_material_volatility = sum(black_material_changes) / max(1, len(black_material_changes))
         
         material_balance_std = float(np.std(material_balances)) if len(material_balances) > 1 else 0.0
         
-        piece_exchange_rate_white = white_piece_exchanges / max(1, white_move_count)
-        piece_exchange_rate_black = black_piece_exchanges / max(1, black_move_count)
+        white_piece_exchange_rate = white_piece_exchanges / max(1, white_move_count)
+        black_piece_exchange_rate = black_piece_exchanges / max(1, black_move_count)
         
-        pawn_exchange_rate_white = white_pawn_exchanges / max(1, white_move_count)
-        pawn_exchange_rate_black = black_pawn_exchanges / max(1, black_move_count)
+        white_pawn_exchange_rate = white_pawn_exchanges / max(1, white_move_count)
+        black_pawn_exchange_rate = black_pawn_exchanges / max(1, black_move_count)
         
         # Add summary logging
         logging.debug(f"Material changes - White: {sum(white_material_changes)}, Black: {sum(black_material_changes)}")
-        logging.debug(f"Material volatility - White: {material_volatility_white}, Black: {material_volatility_black}")
+        logging.debug(f"Material volatility - White: {white_material_volatility}, Black: {black_material_volatility}")
         logging.debug(f"Piece exchanges - White: {white_piece_exchanges}, Black: {black_piece_exchanges}")
         logging.debug(f"Pawn exchanges - White: {white_pawn_exchanges}, Black: {black_pawn_exchanges}")
         logging.debug(f"Material balance std: {material_balance_std}")
         
-        return (material_volatility_white, material_volatility_black, material_balance_std,
-                piece_exchange_rate_white, piece_exchange_rate_black,
-                pawn_exchange_rate_white, pawn_exchange_rate_black)
+        return (white_material_volatility, black_material_volatility, material_balance_std,
+                white_piece_exchange_rate, black_piece_exchange_rate,
+                white_pawn_exchange_rate, black_pawn_exchange_rate)
         
     def _calculate_position_control_features(self, positions: List[chess.Board]) -> Tuple[float, float, float, float]:
         """
@@ -731,10 +737,10 @@ class FeatureExtractor:
                 black_half.add(chess.square(file, rank))
         
         # Initialize accumulators for each metric
-        space_advantage_white_total = 0
-        space_advantage_black_total = 0
-        pawn_control_white_total = 0
-        pawn_control_black_total = 0
+        white_space_advantage_total = 0
+        black_space_advantage_total = 0
+        white_pawn_control_total = 0
+        black_pawn_control_total = 0
         
         # Process each position
         for board in positions:
@@ -747,20 +753,20 @@ class FeatureExtractor:
             black_pawn_control = self._calculate_pawn_control(board, chess.BLACK)
             
             # Accumulate metrics
-            space_advantage_white_total += white_space / len(black_half)
-            space_advantage_black_total += black_space / len(white_half)
-            pawn_control_white_total += white_pawn_control
-            pawn_control_black_total += black_pawn_control
+            white_space_advantage_total += white_space / len(black_half)
+            black_space_advantage_total += black_space / len(white_half)
+            white_pawn_control_total += white_pawn_control
+            black_pawn_control_total += black_pawn_control
         
         # Calculate averages
         num_positions = len(positions)
-        space_advantage_white = space_advantage_white_total / num_positions
-        space_advantage_black = space_advantage_black_total / num_positions
-        pawn_control_white = pawn_control_white_total / num_positions
-        pawn_control_black = pawn_control_black_total / num_positions
+        white_space_advantage = white_space_advantage_total / num_positions
+        black_space_advantage = black_space_advantage_total / num_positions
+        white_pawn_control = white_pawn_control_total / num_positions
+        black_pawn_control = black_pawn_control_total / num_positions
         
-        return (space_advantage_white, space_advantage_black,
-                pawn_control_white, pawn_control_black)
+        return (white_space_advantage, black_space_advantage,
+                white_pawn_control, black_pawn_control)
 
     def _calculate_piece_mobility_for_board(self, board: chess.Board) -> Tuple[float, float]:
         """
@@ -832,7 +838,7 @@ class FeatureExtractor:
                 if rank < 7:  # Not on the last rank
                     if file > 0:  # Not on a-file
                         attack_squares.append(chess.square(file - 1, rank + 1))
-                    if file < 7:  # Not on h-file
+                    if file < 7:  # Not h-file
                         attack_squares.append(chess.square(file + 1, rank + 1))
             else:
                 # Black pawns attack down-left and down-right
@@ -840,7 +846,7 @@ class FeatureExtractor:
                 if rank > 0:  # Not on the first rank
                     if file > 0:  # Not on a-file
                         attack_squares.append(chess.square(file - 1, rank - 1))
-                    if file < 7:  # Not on h-file
+                    if file < 7:  # Not h-file
                         attack_squares.append(chess.square(file + 1, rank - 1))
             
             # Add attack squares to the set
@@ -1013,8 +1019,8 @@ class FeatureExtractor:
             evals: List of position evaluations with engine recommendations
             
         Returns:
-            Tuple of (top_move_alignment_white, top_move_alignment_black, 
-                     top2_3_move_alignment_white, top2_3_move_alignment_black)
+            Tuple of (white_top_move_alignment, black_top_move_alignment, 
+                     white_top2_3_move_alignment, black_top2_3_move_alignment)
         """
         if not moves or not evals or len(evals) < 2:
             return 0.0, 0.0, 0.0, 0.0
@@ -1077,14 +1083,14 @@ class FeatureExtractor:
                     black_top2_3_move_count += 1
         
         # Calculate percentages
-        top_move_alignment_white = white_top_move_count / white_move_count if white_move_count > 0 else 0.0
-        top_move_alignment_black = black_top_move_count / black_move_count if black_move_count > 0 else 0.0
-        top2_3_move_alignment_white = white_top2_3_move_count / white_move_count if white_move_count > 0 else 0.0
-        top2_3_move_alignment_black = black_top2_3_move_count / black_move_count if black_move_count > 0 else 0.0
+        white_top_move_alignment = white_top_move_count / white_move_count if white_move_count > 0 else 0.0
+        black_top_move_alignment = black_top_move_count / black_move_count if black_move_count > 0 else 0.0
+        white_top2_3_move_alignment = white_top2_3_move_count / white_move_count if white_move_count > 0 else 0.0
+        black_top2_3_move_alignment = black_top2_3_move_count / black_move_count if black_move_count > 0 else 0.0
         
         return (
-            top_move_alignment_white, top_move_alignment_black,
-            top2_3_move_alignment_white, top2_3_move_alignment_black
+            white_top_move_alignment, black_top_move_alignment,
+            white_top2_3_move_alignment, black_top2_3_move_alignment
         )
         
     def _calculate_eval_changes(self, evals: List[Info], features: FeatureVector, moves: List[chess.Move]) -> None:
@@ -1216,9 +1222,9 @@ class FeatureExtractor:
             moves: List of moves played
             
         Returns:
-            Tuple of (capture_frequency_white, capture_frequency_black, 
-                    check_frequency_white, check_frequency_black, 
-                    castle_move_white, castle_move_black)
+            Tuple of (white_capture_frequency, black_capture_frequency, 
+                    white_check_frequency, black_check_frequency, 
+                    white_castle_move, black_castle_move)
         """
         if not positions or not moves:
             return 0.0, 0.0, 0.0, 0.0, 0, 0
@@ -1286,14 +1292,16 @@ class FeatureExtractor:
                     black_check_count += 1
         
         # Calculate frequencies
-        capture_frequency_white = white_capture_count / total_white_moves if total_white_moves > 0 else 0.0
-        capture_frequency_black = black_capture_count / total_black_moves if total_black_moves > 0 else 0.0
-        check_frequency_white = white_check_count / total_white_moves if total_white_moves > 0 else 0.0
-        check_frequency_black = black_check_count / total_black_moves if total_black_moves > 0 else 0.0
+        white_capture_frequency = white_capture_count / total_white_moves if total_white_moves > 0 else 0.0
+        black_capture_frequency = black_capture_count / total_black_moves if total_black_moves > 0 else 0.0
+        white_check_frequency = white_check_count / total_white_moves if total_white_moves > 0 else 0.0
+        black_check_frequency = black_check_count / total_black_moves if total_black_moves > 0 else 0.0
+        white_castle_move = white_castle_move / total_white_moves if total_white_moves > 0 else 0.0
+        black_castle_move = black_castle_move / total_black_moves if total_black_moves > 0 else 0.0
         
         # Return actual move numbers for castling (not normalized)
-        return (capture_frequency_white, capture_frequency_black, 
-                check_frequency_white, check_frequency_black, 
+        return (white_capture_frequency, black_capture_frequency, 
+                white_check_frequency, black_check_frequency, 
                 white_castle_move, black_castle_move)
     
     def count_sacrifices(self, positions: List[chess.Board], moves: List[chess.Move], features: FeatureVector) -> None:
@@ -1453,3 +1461,193 @@ class FeatureExtractor:
         except Exception as e:
             logger.error(f"Error calculating opening novelty score: {e}")
             return 0.0, "Unknown Opening", eco_code if eco_code else "Unknown", 0
+
+    def _calculate_prophylactic_moves(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float]:
+        """
+        Calculate the frequency of prophylactic moves for both white and black.
+        Prophylactic moves are preventative moves that address potential threats
+        before they become immediate dangers.
+        
+        This implementation identifies moves that:
+        1. Block potential attack lines to critical squares
+        2. Protect pieces that could be targeted by potential tactics
+        3. Restrict opponent piece mobility in a strategic way
+        
+        Args:
+            positions: List of board positions
+            moves: List of moves played in the game
+            
+        Returns:
+            Tuple of (white_prophylactic_frequency, black_prophylactic_frequency)
+        """
+        if not positions or not moves:
+            return 0.0, 0.0
+            
+        # Convert moves to a list if it's not already one
+        if not isinstance(moves, list):
+            moves = list(moves)
+        
+        white_prophylactic_count = 0
+        black_prophylactic_count = 0
+        total_white_moves = 0
+        total_black_moves = 0
+        
+        for i, move in enumerate(moves):
+            if i >= len(positions):
+                break
+                
+            board = positions[i]
+            is_white = board.turn == chess.WHITE
+            
+            # Count total moves by color
+            if is_white:
+                total_white_moves += 1
+            else:
+                total_black_moves += 1
+                
+            # Skip analysis of captures and checks - these are tactical, not prophylactic
+            is_capture = board.piece_at(move.to_square) is not None
+            next_board = board.copy()
+            next_board.push(move)
+            is_check = next_board.is_check()
+            
+            if is_capture or is_check:
+                continue
+                
+            # Make a copy of the board to analyze
+            test_board = board.copy()
+            hypo_board = board.copy()
+            
+            # Check if the move is prophylactic
+            is_prophylactic = False
+            
+            # 1. Check if move prevents opponent from occupying key center squares
+            move_to = move.to_square
+            move_from = move.from_square
+            central_squares = [chess.E4, chess.D4, chess.E5, chess.D5]  # Central squares
+            
+            # If the move occupies or controls a central square that the opponent was threatening
+            if move_to in central_squares:
+                if hypo_board.is_attacked_by(not is_white, move_to):
+                    is_prophylactic = True
+            
+            # 2. Check if it's a pawn move that prevents opponent's bishop or knight development
+            # a6 in Najdorf to prevent Bb5, or h3 to prevent Bg4
+            if not is_prophylactic and board.piece_type_at(move_from) == chess.PAWN:
+                opponent_color = not is_white
+                
+                # If it's a flank pawn move (a, b, g, h file) in early game
+                file = chess.square_file(move_to)
+                move_num = i // 2 + 1  # 1-based move number
+                
+                if move_num <= 15 and (file <= 1 or file >= 6):
+                    # Check if it prevents a bishop or knight from occupying a square
+                    nearby_squares = []
+                    
+                    # Calculate what squares this pawn move defends
+                    if is_white:
+                        if file > 0:  # Not a-file
+                            nearby_squares.append(chess.square(file-1, chess.square_rank(move_to)+1))
+                        if file < 7:  # Not h-file
+                            nearby_squares.append(chess.square(file+1, chess.square_rank(move_to)+1))
+                    else:
+                        if file > 0:  # Not a-file
+                            nearby_squares.append(chess.square(file-1, chess.square_rank(move_to)-1))
+                        if file < 7:  # Not h-file
+                            nearby_squares.append(chess.square(file+1, chess.square_rank(move_to)-1))
+                    
+                    # Check if any of these squares could have been occupied by opponent pieces
+                    for sq in nearby_squares:
+                        # If the square is on the board and not occupied
+                        if 0 <= sq < 64 and not board.piece_at(sq):
+                            # Check if any opponent bishop could move to this square
+                            for bishop_sq in board.pieces(chess.BISHOP, opponent_color):
+                                if chess.Move(bishop_sq, sq) in board.legal_moves:
+                                    is_prophylactic = True
+                                    break
+                            
+                            # Check if any opponent knight could move to this square
+                            if not is_prophylactic:
+                                for knight_sq in board.pieces(chess.KNIGHT, opponent_color):
+                                    if chess.Move(knight_sq, sq) in board.legal_moves:
+                                        is_prophylactic = True
+                                        break
+                            
+                            if is_prophylactic:
+                                break
+            
+            # 3. Check if it's a "luft" move (h3/h6 to prevent back rank mate)
+            if not is_prophylactic:
+                king_square = board.king(board.turn)
+                if king_square is not None:
+                    # If king is on back rank
+                    king_rank = chess.square_rank(king_square)
+                    if (is_white and king_rank == 0) or (not is_white and king_rank == 7):
+                        # If it's a pawn move creating luft for the king
+                        if board.piece_type_at(move_from) == chess.PAWN:
+                            pawn_file = chess.square_file(move_from)
+                            king_file = chess.square_file(king_square)
+                            # If the pawn is near the king (within 2 files)
+                            if abs(pawn_file - king_file) <= 2:
+                                # If it's h2-h3 or h7-h6 type of move
+                                if abs(chess.square_rank(move_from) - chess.square_rank(move_to)) == 1:
+                                    is_prophylactic = True
+            
+            # 4. Check if it prevents a fork or discovered attack
+            if not is_prophylactic:
+                # Make the move
+                test_board.push(move)
+                
+                # For each opponent knight, check if it had potential fork opportunities
+                opponent_knights = board.pieces(chess.KNIGHT, not is_white)
+                for knight_sq in opponent_knights:
+                    # Get squares the knight can potentially move to
+                    knight_targets = []
+                    for target_sq in chess.SQUARES:
+                        # Chess library doesn't have a direct knight_attacks method,
+                        # so we'll check if the move would be legal ignoring turn
+                        if not board.piece_at(target_sq) or board.piece_at(target_sq).color == is_white:
+                            knight_move = chess.Move(knight_sq, target_sq)
+                            # Use is_pseudo_legal to ignore whose turn it is
+                            if board.is_pseudo_legal(knight_move):
+                                knight_targets.append(target_sq)
+                    
+                    # Check if any knight move could have attacked multiple pieces
+                    for attack_sq in knight_targets:
+                        # Create a hypothetical board where opponent's knight moved
+                        fork_board = board.copy()
+                        fork_board.remove_piece_at(knight_sq)
+                        fork_board.set_piece_at(attack_sq, chess.Piece(chess.KNIGHT, not is_white))
+                        
+                        # Count how many pieces this knight would attack
+                        attack_count = 0
+                        for square in chess.SQUARES:
+                            if fork_board.piece_at(square) and fork_board.piece_at(square).color == is_white:
+                                # Check if the knight at attack_sq could attack the piece at square
+                                # Need to check if this is a valid knight move
+                                if fork_board.is_attacked_by(not is_white, square):
+                                    attack_count += 1
+                        
+                        # If knight could fork 2+ pieces, and our move prevents this
+                        if attack_count >= 2:
+                            # Check if our move prevents this fork
+                            knight_move = chess.Move(knight_sq, attack_sq)
+                            # After our move, check if the knight move is still possible
+                            after_our_move = board.copy()
+                            after_our_move.push(move)
+                            if not after_our_move.is_legal(knight_move) or attack_sq == move_to:
+                                is_prophylactic = True
+                                break
+            
+            # Count prophylactic moves by color
+            if is_prophylactic:
+                if is_white:
+                    white_prophylactic_count += 1
+                else:
+                    black_prophylactic_count += 1
+        
+        # Calculate frequencies
+        white_prophylactic_frequency = white_prophylactic_count / total_white_moves if total_white_moves > 0 else 0.0
+        black_prophylactic_frequency = black_prophylactic_count / total_black_moves if total_black_moves > 0 else 0.0
+        
+        return white_prophylactic_frequency, black_prophylactic_frequency

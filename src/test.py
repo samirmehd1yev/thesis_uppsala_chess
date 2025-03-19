@@ -177,7 +177,14 @@ def print_analysis_table(analysis_result):
         curr_eval = evals[i+1] if i+1 < len(evals) else None
         
         # Get sharpness for current position
-        current_sharpness = sharpness_scores[i].get('sharpness', 0.0) if i < len(sharpness_scores) else 0.0
+        # Use the appropriate sharpness value based on whose move it is
+        if i < len(sharpness_scores):
+            if is_white_move:
+                current_sharpness = sharpness_scores[i].get('white_sharpness', 0.0)
+            else:
+                current_sharpness = sharpness_scores[i].get('black_sharpness', 0.0)
+        else:
+            current_sharpness = 0.0
         
         # Format sharpness with color
         def format_sharpness(sharp_value):
@@ -314,6 +321,10 @@ def print_feature_summary(features):
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
             "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
             "black_accuracy"
+        ],
+        "Strategic Orientation": [
+            "opening_novelty_score", "opening_name", "forced_complexity_index",
+            "white_sharpness", "black_sharpness"
         ]
     }
     
@@ -331,6 +342,14 @@ def print_feature_summary(features):
                         print(f"  {name}: {Fore.YELLOW}{value:.1f}%{Style.RESET_ALL}")
                     else:
                         print(f"  {name}: {Fore.RED}{value:.1f}%{Style.RESET_ALL}")
+                elif name == "white_sharpness" or name == "black_sharpness":
+                    # Format sharpness with color
+                    if value < 2.0:
+                        print(f"  {name}: {Fore.GREEN}{value:.2f}{Style.RESET_ALL}")
+                    elif value < 5.0:
+                        print(f"  {name}: {Fore.YELLOW}{value:.2f}{Style.RESET_ALL}")
+                    else:
+                        print(f"  {name}: {Fore.RED}{value:.2f}{Style.RESET_ALL}")
                 elif isinstance(value, (int, float)):
                     print(f"  {name}: {value:.2f}")
                 else:
@@ -373,7 +392,6 @@ def print_sharpness_summary(cumulative_sharpness):
     print(f"{Fore.BLUE}{Style.BRIGHT}POSITION SHARPNESS SUMMARY{Style.RESET_ALL}")
     print("="*80)
     
-    overall = cumulative_sharpness.get('sharpness', 0.0)
     white = cumulative_sharpness.get('white_sharpness', 0.0)
     black = cumulative_sharpness.get('black_sharpness', 0.0)
     
@@ -386,15 +404,67 @@ def print_sharpness_summary(cumulative_sharpness):
         else:
             return Fore.RED  # High sharpness - tactical/volatile positions
     
-    print(f"Overall Cumulative Sharpness: {sharpness_color(overall)}{overall:.2f}{Style.RESET_ALL}")
     print(f"White's Cumulative Sharpness: {sharpness_color(white)}{white:.2f}{Style.RESET_ALL} (positions where White is to move)")
     print(f"Black's Cumulative Sharpness: {sharpness_color(black)}{black:.2f}{Style.RESET_ALL} (positions where Black is to move)")
+    
+    print(f"\nWhite-to-Black Sharpness Ratio: {white/black:.2f}" if black > 0 else "\nWhite-to-Black Sharpness Ratio: N/A")
+    print("(Higher values indicate sharper/more critical positions for White vs Black)")
     
     print("\nSharpness Interpretation:")
     print(f"  {Fore.GREEN}0-2{Style.RESET_ALL}: Calm, positional play")
     print(f"  {Fore.YELLOW}2-5{Style.RESET_ALL}: Moderately complex")
     print(f"  {Fore.RED}5-10{Style.RESET_ALL}: Highly tactical/volatile")
     
+    print("="*80)
+
+def print_move_statistics(analysis_result):
+    """Print move statistics like captures, checks, castling and prophylactic frequencies"""
+    if not analysis_result:
+        print("No analysis available.")
+        return
+        
+    features = analysis_result.get("features")
+    
+    if not features:
+        return
+        
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}MOVE STATISTICS{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Display capture frequencies
+    print(f"White Capture Frequency: {features.white_capture_frequency:.2f}")
+    print(f"Black Capture Frequency: {features.black_capture_frequency:.2f}")
+    
+    # Display check frequencies
+    print(f"White Check Frequency: {features.white_check_frequency:.2f}")
+    print(f"Black Check Frequency: {features.black_check_frequency:.2f}")
+    
+    # Display prophylactic frequencies
+    if hasattr(features, 'white_prophylactic_frequency'):
+        print(f"White Prophylactic Frequency: {features.white_prophylactic_frequency:.2f}")
+    if hasattr(features, 'black_prophylactic_frequency'):
+        print(f"Black Prophylactic Frequency: {features.black_prophylactic_frequency:.2f}")
+    
+    # Display castling timing
+    if hasattr(features, 'white_castle_move'):
+        castle_white = features.white_castle_move
+        if castle_white > 0:
+            total_moves = features.total_moves
+            castle_move_number = int(castle_white * total_moves)
+            print(f"White Castling: Move {castle_move_number} ({castle_white:.2f} of game)")
+        else:
+            print(f"White Castling: Did not castle")
+    
+    if hasattr(features, 'black_castle_move'):
+        castle_black = features.black_castle_move
+        if castle_black > 0:
+            total_moves = features.total_moves
+            castle_move_number = int(castle_black * total_moves)
+            print(f"Black Castling: Move {castle_move_number} ({castle_black:.2f} of game)")
+        else:
+            print(f"Black Castling: Did not castle")
+            
     print("="*80)
 
 def main():
@@ -408,6 +478,8 @@ def main():
     parser.add_argument('--cpus', type=int, help='Number of CPU cores to use (default: cpu_count - 1)')
     parser.add_argument('--output', type=str, help='Path to output file for analysis report (HTML or TXT)')
     parser.add_argument('--quiet', action='store_true', help='Only output errors')
+    parser.add_argument('--lc0', type=str, help='Path to Leela Chess Zero executable')
+    parser.add_argument('--network', type=str, help='Path to neural network file for LC0')
     
     args = parser.parse_args()
     
@@ -448,7 +520,9 @@ def main():
         analysis_depth=args.depth,
         threads=args.threads,
         hash_size=args.hash,
-        num_cpus=args.cpus
+        num_cpus=args.cpus,
+        lc0_path=args.lc0,
+        network_path=args.network
     )
     
     # Run analysis
@@ -463,7 +537,8 @@ def main():
     print_analysis_table(analysis_result)
     print_feature_summary(analysis_result.get("features"))
     print_sharpness_summary(analysis_result.get("cumulative_sharpness"))
-    print_king_safety_analysis(analysis_result)  
+    print_king_safety_analysis(analysis_result)
+    print_move_statistics(analysis_result)
     
     # Save to file if requested
     if args.output:
