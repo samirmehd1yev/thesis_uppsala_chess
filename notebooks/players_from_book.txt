@@ -1,0 +1,64 @@
+# activist
+Alekhine, Alexander
+Tal, Mikhail
+Spassky, Boris V.
+Kasparov, G.
+Kasparov, Garry
+Kasparov, G.
+Anand, Viswanathan
+Anand,V
+Shirov, Alexei
+Morozevich, Alexander
+Topalov, Veselin
+Pillsbury, Harry
+Anderssen, Adolf
+Bronstein, David I
+Bronstein, Luis Marcos
+Larsen, B.
+Larsen, Bent
+Taimanov, Mark E
+Aronian, Levon
+Polgar, Judit
+Muller, K.
+
+# Theorists
+Steinitz, Wilhelm
+Botvinnik, M.
+Kramnik, Vladimir
+Tarrasch, Siegbert
+Nimzowitsch, Aron
+Leko, Peter
+Giri, Anish
+Meier, Georg
+Andersson, Ulf
+Sedlak, Nikola
+Tiviakov, Sergei
+Ponomariov, Ruslan
+Wahls, Matthias
+Moskalenko, Viktor1
+Moskalenko, Viktor
+Moskalenko, V.
+Dorfman, Iossif
+Bangiev, Alexander
+Hansen, Lars Bo
+
+# Reflectors
+Capablanca, Jose
+Smyslov, V.
+Petrosian, T.
+Karpov, A.
+Karpov, Anatoly
+Carlsen, Magnus
+Adams, Michael
+Keymer, Vincent
+Bischoff, K.
+Bischoff,K
+
+# Pragmatists
+Fischer, R.
+Euwe, Max
+Korchnoi, Viktor
+Caruana, Fabiano
+Ding, Liren
+Karjakin, Sergey
+Vachier-Lagrave, Maxime

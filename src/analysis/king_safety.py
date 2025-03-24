@@ -4,13 +4,13 @@ import math
 
 class KingSafetyEvaluator:
     """
-    Evaluates king safety using multiple methods described in chess programming literature.
-    Implements concepts from Chess Programming Wiki:
-    - Pawn Shield evaluation
-    - Pawn Storm detection
-    - King Tropism (distance of attacking pieces)
-    - King Zone attacks (counting attacks on squares around the king)
-    - Attack Units with scaling
+    Evaluates king safety using concepts from Stockfish.
+    Implements:
+    - Pawn shield evaluation
+    - Pawn storm detection
+    - King tropism (distance of attacking pieces)
+    - King zone attacks (counting attacks on squares around the king)
+    - Attack units with scaling
     """
     
     # Constants for king safety evaluation
@@ -59,7 +59,7 @@ class KingSafetyEvaluator:
         chess.KING: 0,      # Kings not considered for tropism
     }
     
-    # Attack unit values for different pieces
+    # Attack unit values for different pieces (based on Stockfish)
     ATTACK_UNIT_VALUES = {
         chess.PAWN: 0,      # Pawns don't count for attack units
         chess.KNIGHT: 2,    # Knights contribute 2 attack units
@@ -68,8 +68,7 @@ class KingSafetyEvaluator:
         chess.QUEEN: 5,     # Queens contribute 5 attack units
     }
     
-    # Safety table for converting attack units to score
-    # This is similar to the table from Glaurung/Stockfish
+    # Safety table for converting attack units to score (Stockfish-like)
     SAFETY_TABLE = [
         0,   0,   1,   2,   3,   5,   7,   9,  12,  15,
         18,  22,  26,  30,  35,  39,  44,  50,  56,  62,
@@ -82,6 +81,15 @@ class KingSafetyEvaluator:
         500, 500, 500, 500, 500, 500, 500, 500, 500, 500,
         500, 500, 500, 500, 500, 500, 500, 500, 500, 500
     ]
+    
+    # King attack weights by piece type (from Stockfish)
+    KING_ATTACK_WEIGHTS = {
+        chess.PAWN: 0,
+        chess.KNIGHT: 76,
+        chess.BISHOP: 46,
+        chess.ROOK: 45,
+        chess.QUEEN: 14
+    }
     
     def __init__(self):
         """Initialize the KingSafetyEvaluator with pre-calculated data"""
@@ -118,14 +126,17 @@ class KingSafetyEvaluator:
         attack_score = self.evaluate_king_zone_attacks(board, king_zone, opponent)
         open_file_score = self.evaluate_open_files_near_king(board, king_square, color)
         
-        # Combine scores with appropriate weights
-        # The weights can be adjusted based on testing and engine preferences
+        # Calculate king danger score (Stockfish approach)
+        king_danger = self.calculate_king_danger(board, king_zone, king_square, color)
+        
+        # Combine scores with appropriate weights (Stockfish-like)
         safety_score = (
             shield_score * 1.0 +       # Pawn shield is important
             storm_score * 0.8 +        # Pawn storm is a potential threat
             open_file_score * 1.2 +    # Open files are very dangerous
             tropism_score * 0.5 +      # Piece distance is a moderate factor
-            attack_score * 1.5         # Attacks are highly dangerous
+            attack_score * 1.5 -       # Attacks are highly dangerous
+            king_danger               # King danger score (negative)
         )
         
         # Scale based on material balance - fewer opponent pieces means less danger
@@ -138,7 +149,7 @@ class KingSafetyEvaluator:
         """
         Get the 'king zone' - squares that are within 2 squares of the king.
         This includes squares the king can move to and additional squares
-        in front of the king (facing his starting position).
+        in front of the king (similar to Stockfish's kingRing).
         
         Args:
             king_square: Square where the king is located
@@ -155,12 +166,13 @@ class KingSafetyEvaluator:
         king_file = chess.square_file(king_square)
         king_rank = chess.square_rank(king_square)
         
-        # Add squares in a 3x3 box around the king
+        # Add squares in a 3x3 box around the king (king attacks plus king square)
         for f in range(max(0, king_file - 1), min(8, king_file + 2)):
             for r in range(max(0, king_rank - 1), min(8, king_rank + 2)):
                 king_zone.add(chess.square(f, r))
         
-        # Add additional forward squares based on king's rank
+        # Add additional forward squares based on king's rank (mimics Stockfish's approach)
+        # This creates an extended ring in front of the king
         if king_rank < 6:  # Not near the last rank
             # Add forward squares (assuming white, reversed for black)
             forward_rank = king_rank + 2
@@ -175,6 +187,7 @@ class KingSafetyEvaluator:
     def evaluate_pawn_shield(self, board: chess.Board, king_square: chess.Square, color: chess.Color) -> int:
         """
         Evaluate the pawn shield in front of the king.
+        Similar to Stockfish's king shelter calculation.
         
         Args:
             board: Chess board position
@@ -201,7 +214,7 @@ class KingSafetyEvaluator:
             elif king_file <= 3:
                 castling_side = 'queenside'
         
-        # If king hasn't castled, less shield penalty
+        # If king hasn't castled, use different evaluation approach
         if castling_side == 'none':
             # For non-castled kings, evaluate nearby pawns
             for file_offset in range(-1, 2):
@@ -217,14 +230,14 @@ class KingSafetyEvaluator:
                             shield_score += shield_value
             return shield_score
         
-        # Evaluate castled king's pawn shield
+        # Evaluate castled king's pawn shield (Stockfish-like approach)
         if castling_side == 'kingside':
             # Check kingside castling (f, g, h pawns)
             files_to_check = ['f', 'g', 'h']
             for file_str in files_to_check:
                 file_idx = ord(file_str) - ord('a')
                 
-                # For white, check rank 2 and 3; for black, check rank 7 and 6
+                # Determine shield ranks based on color
                 if color == chess.WHITE:
                     shield_ranks = [1, 2]  # 0-indexed
                 else:
@@ -253,7 +266,7 @@ class KingSafetyEvaluator:
             for file_str in files_to_check:
                 file_idx = ord(file_str) - ord('a')
                 
-                # For white, check rank 2 and 3; for black, check rank 7 and 6
+                # Determine shield ranks based on color
                 if color == chess.WHITE:
                     shield_ranks = [1, 2]  # 0-indexed
                 else:
@@ -281,6 +294,7 @@ class KingSafetyEvaluator:
     def evaluate_pawn_storm(self, board: chess.Board, king_square: chess.Square, color: chess.Color) -> int:
         """
         Evaluate pawn storms (enemy pawns advancing toward the king).
+        Based on Stockfish's pawn storm evaluation.
         
         Args:
             board: Chess board position
@@ -338,6 +352,7 @@ class KingSafetyEvaluator:
     def evaluate_open_files_near_king(self, board: chess.Board, king_square: chess.Square, color: chess.Color) -> int:
         """
         Evaluate the danger from open files near the king.
+        Similar to Stockfish's approach for penalizing open files.
         
         Args:
             board: Chess board position
@@ -387,6 +402,7 @@ class KingSafetyEvaluator:
     def evaluate_king_tropism(self, board: chess.Board, king_square: chess.Square, opponent_color: chess.Color) -> int:
         """
         Evaluate king tropism (distance of enemy pieces to the king).
+        Similar to how piece proximity is considered in Stockfish.
         
         Args:
             board: Chess board position
@@ -404,7 +420,7 @@ class KingSafetyEvaluator:
         for square in chess.SQUARES:
             piece = board.piece_at(square)
             
-            # Skip empty squares and opponent's pieces
+            # Skip empty squares and friendly pieces
             if not piece or piece.color != opponent_color:
                 continue
             
@@ -427,10 +443,127 @@ class KingSafetyEvaluator:
         
         return int(tropism_score)
     
+    def calculate_king_danger(self, board: chess.Board, king_zone: Set[chess.Square], 
+                             king_square: chess.Square, color: chess.Color) -> int:
+        """
+        Calculate king danger using Stockfish algorithm.
+        
+        Args:
+            board: Chess board position
+            king_zone: Set of squares in the king zone
+            king_square: Square where the king is located
+            color: Color of the king
+            
+        Returns:
+            King danger score (higher means more danger)
+        """
+        enemy_color = not color
+        king_danger = 0
+        
+        # Count attackers and weights
+        king_attackers_count = 0
+        king_attackers_weight = 0
+        king_attacks_count = 0
+        
+        # Check attacks on king zone
+        for zone_square in king_zone:
+            attackers = board.attackers(enemy_color, zone_square)
+            
+            for attacker_square in attackers:
+                piece = board.piece_at(attacker_square)
+                if piece and piece.piece_type != chess.KING:
+                    # Count attacks on squares directly adjacent to king
+                    if chess.square_distance(zone_square, king_square) == 1:
+                        king_attacks_count += 1
+                    
+                    # Count unique attackers (Stockfish's approach)
+                    king_attackers_count += 1
+                    king_attackers_weight += self.KING_ATTACK_WEIGHTS.get(piece.piece_type, 0)
+        
+        # Count squares in king zone that are weak
+        weak_squares = 0
+        for zone_square in king_zone:
+            # Count squares attacked by enemy but not well defended by us
+            if board.is_attacked_by(enemy_color, zone_square):
+                defenders = 0
+                for defender_square in board.attackers(color, zone_square):
+                    defenders += 1
+                    # If defended only by king or queen, consider it weakly defended
+                    defender_piece = board.piece_at(defender_square)
+                    if defender_piece and defender_piece.piece_type in [chess.KING, chess.QUEEN]:
+                        defenders -= 0.5
+                        
+                if defenders < 1:
+                    weak_squares += 1
+        
+        # Check counts
+        unsafe_checks = 0
+        safe_checks = 0
+        
+        # Knight checks
+        knight_checks = list(board.pieces(chess.KNIGHT, enemy_color))
+        for knight_sq in knight_checks:
+            if king_square in [s for s in chess.SQUARES if chess.BB_KNIGHT_ATTACKS[knight_sq] & chess.BB_SQUARES[s]]:
+                if not board.attackers(color, knight_sq):
+                    safe_checks += 1
+                else:
+                    unsafe_checks += 1
+                    
+        # Bishop checks
+        bishop_squares = list(board.pieces(chess.BISHOP, enemy_color))
+        for bishop_sq in bishop_squares:
+            if board.attacks(bishop_sq) & chess.BB_SQUARES[king_square]:
+                if not board.attackers(color, bishop_sq):
+                    safe_checks += 1
+                else:
+                    unsafe_checks += 1
+                    
+        # Rook checks
+        rook_squares = list(board.pieces(chess.ROOK, enemy_color))
+        for rook_sq in rook_squares:
+            if board.attacks(rook_sq) & chess.BB_SQUARES[king_square]:
+                if not board.attackers(color, rook_sq):
+                    safe_checks += 1
+                else:
+                    unsafe_checks += 1
+        
+        # Queen checks (for discovery checks)
+        queen_squares = list(board.pieces(chess.QUEEN, enemy_color))
+        for queen_sq in queen_squares:
+            if board.attacks(queen_sq) & chess.BB_SQUARES[king_square]:
+                if not board.attackers(color, queen_sq):
+                    safe_checks += 1
+                else:
+                    unsafe_checks += 1
+        
+        # Calculate king danger score (Stockfish-inspired formula)
+        king_danger = (
+            king_attackers_count * king_attackers_weight +  # Weight of attackers
+            180 * weak_squares +                           # Weak squares penalty
+            150 * unsafe_checks +                          # Unsafe checks penalty
+            250 * board.is_check() +                       # Current check penalty
+            70 * king_attacks_count +                      # Direct attacks on king
+            130 * safe_checks                              # Safe checks bonus
+        )
+        
+        # Scale danger based on number of attackers
+        if king_attackers_count < 2:
+            king_danger = king_danger * king_attackers_count // 2
+        
+        # Scale danger if enemy has no queen (similar to Stockfish)
+        if not any(board.pieces(chess.QUEEN, enemy_color)):
+            king_danger = king_danger * 70 // 100
+        
+        # Final scaling - use a simplified version of Stockfish's approach
+        if king_danger > 100:
+            king_danger = king_danger * king_danger // 4000
+        
+        return king_danger
+    
     def evaluate_king_zone_attacks(self, board: chess.Board, king_zone: Set[chess.Square], opponent_color: chess.Color) -> int:
         """
         Evaluate attacks on the king zone (squares around the king).
-        Uses the attack units and safety table approach from Stockfish/Glaurung.
+        Uses the attack units and safety table approach from Stockfish.
         
         Args:
             board: Chess board position
@@ -463,7 +596,6 @@ class KingSafetyEvaluator:
                     attack_units += self.ATTACK_UNIT_VALUES.get(piece.piece_type, 0)
                     
                     # Check for additional threats
-                    
                     # Knight check threat (knight is one move away from checking)
                     if piece.piece_type == chess.KNIGHT and zone_square == board.king(not opponent_color):
                         attack_units += 5
@@ -516,47 +648,3 @@ class KingSafetyEvaluator:
         material_scale = min(1.0, max(0.1, total_material / 15))
         
         return material_scale
-
-    def visualize_king_safety(self, board: chess.Board) -> Dict[str, Dict[str, float]]:
-        """
-        Provide a detailed breakdown of king safety for both sides.
-        Useful for debugging and understanding king safety factors.
-        
-        Args:
-            board: Chess board position
-            
-        Returns:
-            Dictionary with detailed safety metrics for both colors
-        """
-        result = {}
-        
-        for color in [chess.WHITE, chess.BLACK]:
-            king_square = board.king(color)
-            if king_square is None:
-                continue
-                
-            color_name = "white" if color == chess.WHITE else "black"
-            king_zone = self.get_king_zone(king_square)
-            
-            # Get individual components
-            shield_score = self.evaluate_pawn_shield(board, king_square, color)
-            storm_score = self.evaluate_pawn_storm(board, king_square, color)
-            tropism_score = self.evaluate_king_tropism(board, king_square, not color)
-            open_file_score = self.evaluate_open_files_near_king(board, king_square, color)
-            attack_score = self.evaluate_king_zone_attacks(board, king_zone, not color)
-            
-            # Calculate total
-            material_scale = self.get_material_scale(board, not color)
-            total_score = int((shield_score + storm_score + open_file_score + tropism_score + attack_score) * material_scale)
-            
-            result[color_name] = {
-                "shield_score": shield_score,
-                "storm_score": storm_score,
-                "open_file_score": open_file_score,
-                "tropism_score": tropism_score,
-                "attack_score": attack_score,
-                "material_scale": material_scale,
-                "total": total_score
-            }
-            
-        return result

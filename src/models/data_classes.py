@@ -299,15 +299,8 @@ class FeatureVector:
     #--------------------------------------------------------------------------
     opening_novelty_score: float = 0.0          # Ratio of moves matching ECO theory to total opening moves (higher = more "in book")
     opening_name: str = ""                      # Name of the recognized chess opening (e.g., "Sicilian Defense: Najdorf Variation")
-    forced_complexity_index: float = 0.0        # Engine-derived complexity of created positions [1]
     white_sharpness: float = 0.0                # Cumulative sharpness score for white positions
     black_sharpness: float = 0.0                # Cumulative sharpness score for black positions
-
-    #--------------------------------------------------------------------------
-    # ENHANCED MATERIAL DYNAMICS
-    #--------------------------------------------------------------------------
-    speculative_sacrifice_ratio: float = 0.0    # (Sacrifices with Δeval > 150 vs ≤150) [7]
-    material_imbalance_tolerance: float = 0.0   # Max material deficit with maintained advantage
     
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)

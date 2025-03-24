@@ -27,14 +27,11 @@ import argparse
 
 # Import from existing codebase
 from features.extractor import FeatureExtractor
-from analysis.game_analyzer import GameAnalyzer
-from models.data_classes import Info, FeatureVector
 from models.enums import Judgment
-from analysis.phase_detector import GamePhaseDetector
-from analysis.king_safety import KingSafetyEvaluator
 from analysis.move_analyzer import MoveAnalyzer
 from analysis.sharpness_analyzer import WdlSharpnessAnalyzer
 from tools.eco_database_loader import eco_loader
+from models.data_classes import Info
 
 # Configure logging
 logging.basicConfig(

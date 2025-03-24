@@ -1,0 +1,42 @@
+
+# Feature Analysis for Chess Player Type Classification
+
+## Key Findings
+
+1. **Optimal Number of Clusters**: 2 clusters were identified as optimal based on silhouette score, which aligns with the theoretical framework of 4 player types.
+
+2. **Top Discriminative Features**:
+   - opening_accuracy, piece_mobility_avg, sharpness, center_control_avg, king_safety
+
+3. **Player Type Characteristics**:
+   - **Activists**: Characterized by great_count
+   - **Theorists**: Characterized by 
+   - **Reflectors**: Characterized by eval_volatility
+   - **Pragmatists**: Characterized by 
+
+4. **Feature Correlations**:
+   - Highly correlated feature pairs include: avg_eval_change/eval_volatility (0.96), material_changes/capture_frequency_black (0.93), capture_frequency_white/material_changes (0.92)
+   - This suggests potential for dimensionality reduction.
+
+5. **Variance Explained**:
+   - PCA analysis reveals that 37.99% of variance is explained by the first 3 principal components.
+
+## Recommendations for Clustering
+
+1. Consider using the following feature subset for clustering:
+   opening_accuracy
+   piece_mobility_avg
+   sharpness
+   center_control_avg
+   king_safety
+   vulnerability_spikes
+   space_advantage_white
+   king_safety_min
+   prophylactic_frequency
+   middlegame_accuracy
+
+2. Apply appropriate scaling before clustering (StandardScaler recommended).
+
+3. Experiment with both K-Means (k=2) and hierarchical clustering.
+
+4. Validate clusters against known player types to establish ground truth.
