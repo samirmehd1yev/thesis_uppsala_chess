@@ -7,12 +7,13 @@ from models.enums import Judgment
 from analysis.phase_detector import GamePhaseDetector
 from analysis.move_analyzer import MoveAnalyzer
 from analysis.king_safety import KingSafetyEvaluator
+from analysis.piece_mobility import PieceMobility
 
 class FeatureExtractor:
     def __init__(self):
         self.phase_detector = GamePhaseDetector()
         self.king_safety_evaluator = KingSafetyEvaluator()
-        
+        self.piece_mobility = PieceMobility()
     def extract_features(self, game: chess.pgn.Game, evals: Optional[List[Info]] = None, judgments: Optional[List[Judgment]] = None) -> FeatureVector:
         """
         Extract all features from a game
@@ -50,7 +51,7 @@ class FeatureExtractor:
         features.white_material_changes = white_material
         features.black_material_changes = black_material
         
-        white_mobility, black_mobility = self._calculate_mobility_by_color(positions)
+        white_mobility, black_mobility = self.piece_mobility.calculate_mobility_by_color(positions)
         features.white_piece_mobility_avg = white_mobility
         features.black_piece_mobility_avg = black_mobility
         
