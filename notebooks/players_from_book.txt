@@ -2,6 +2,7 @@
 Alekhine, Alexander
 Tal, Mikhail
 Spassky, Boris V.
+Spassky, Boris Vasilievich
 Kasparov, G.
 Kasparov, Garry
 Kasparov, G.
@@ -24,6 +25,7 @@ Muller, K.
 # Theorists
 Steinitz, Wilhelm
 Botvinnik, M.
+Botvinnik, Mikhail URS
 Kramnik, Vladimir
 Tarrasch, Siegbert
 Nimzowitsch, Aron

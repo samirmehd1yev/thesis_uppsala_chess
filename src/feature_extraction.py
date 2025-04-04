@@ -770,7 +770,7 @@ def main():
     parser.add_argument('--debug', action='store_true', help='Print detailed debug information like in test.py')
     parser.add_argument('--input', type=str, default=INPUT_CSV, help='Input CSV file path')
     parser.add_argument('--output', type=str, default=OUTPUT_CSV, help='Output CSV file path')
-    parser.add_argument('--wdl', type=str, choices=['lc0', 'sf'], default='lc0',
+    parser.add_argument('--wdl', type=str, choices=['lc0', 'sf'], default='sf',
                         help='Engine to use for WDL calculations: lc0 (Leela Chess Zero) or sf (Stockfish)')
     args = parser.parse_args()
     
@@ -835,7 +835,7 @@ def main():
             total_games = 1
         else:
             # Read in chunks for memory efficiency
-            chunk_size = 1 if args.test else 1000
+            chunk_size = 1 if args.test else 10000
             chunks = pd.read_csv(input_csv, chunksize=chunk_size)
             total_games = 0
             processed_games = 0

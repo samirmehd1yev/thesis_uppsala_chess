@@ -769,44 +769,6 @@ class FeatureExtractor:
         return (white_space_advantage, black_space_advantage,
                 white_pawn_control, black_pawn_control)
 
-    def _calculate_piece_mobility_for_board(self, board: chess.Board) -> Tuple[float, float]:
-        """
-        Calculate average piece mobility for both players.
-        
-        Args:
-            board: Chess board position
-            
-        Returns:
-            Tuple of (white_mobility, black_mobility)
-        """
-        # Create copies of the board for each side's turn
-        white_board = board.copy()
-        black_board = board.copy()
-        
-        # Ensure it's White's turn on the white board
-        if white_board.turn != chess.WHITE:
-            white_board.push(chess.Move.null())
-        
-        # Ensure it's Black's turn on the black board
-        if black_board.turn != chess.BLACK:
-            black_board.push(chess.Move.null())
-        
-        # Count pieces for each player (excluding kings)
-        white_piece_count = sum(1 for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]
-                              for _ in board.pieces(piece_type, chess.WHITE))
-        
-        black_piece_count = sum(1 for piece_type in [chess.PAWN, chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN]
-                              for _ in board.pieces(piece_type, chess.BLACK))
-        
-        # Count legal moves for each side
-        white_legal_moves = len(list(white_board.legal_moves))
-        black_legal_moves = len(list(black_board.legal_moves))
-        
-        # Calculate average mobility (moves per piece)
-        white_mobility = white_legal_moves / white_piece_count if white_piece_count > 0 else 0.0
-        black_mobility = black_legal_moves / black_piece_count if black_piece_count > 0 else 0.0
-        
-        return white_mobility, black_mobility
 
     def _calculate_pawn_control(self, board: chess.Board, color: chess.Color) -> float:
         """
