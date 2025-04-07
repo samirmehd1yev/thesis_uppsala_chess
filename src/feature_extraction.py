@@ -695,7 +695,7 @@ class GameFeatureExtractor:
             )
             
             # Calculate move statistics
-            capture_freq_white, capture_freq_black, check_freq_white, check_freq_black, white_castle_move, black_castle_move = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
+            check_freq_white, check_freq_black, white_castle_move, black_castle_move = self.feature_extractor._calculate_move_statistics(positions, mainline_moves)
             
             # Calculate opening novelty score and get opening information
             opening_novelty_score, eco_code, opening_name, matching_plies = self.calculate_opening_novelty_score(game, features, game_row.get('eco'))
@@ -724,8 +724,6 @@ class GameFeatureExtractor:
             result['black_sharpness'] = cumulative_sharpness['black_sharpness']
             
             # Add move statistics
-            result['white_capture_frequency'] = capture_freq_white
-            result['black_capture_frequency'] = capture_freq_black
             result['white_check_frequency'] = check_freq_white
             result['black_check_frequency'] = check_freq_black
             result['white_castle_move'] = white_castle_move
@@ -1083,8 +1081,7 @@ def print_game_analysis(result, game_data):
     print_accuracy_summary(result)
     
     # Print move statistics if available
-    if 'white_capture_frequency' in result or 'black_capture_frequency' in result:
-        print_move_statistics(result)
+    print_move_statistics(result)
     
     # Print feature summary
     print_feature_summary(result)
@@ -1117,12 +1114,7 @@ def print_feature_summary(features):
             "white_queen_development", "black_queen_development"
         ],
         "Material Dynamics": [
-            "white_material_changes", "black_material_changes", "material_balance_std",
-            "white_material_volatility", "black_material_volatility"
-        ],
-        "Exchange Rates": [
-            "white_piece_exchange_rate", "black_piece_exchange_rate",
-            "white_pawn_exchange_rate", "black_pawn_exchange_rate"
+            "white_material_changes", "black_material_changes", "material_balance_std"
         ],
         "Positional Control": [
             "white_piece_mobility_avg", "black_piece_mobility_avg",
@@ -1131,13 +1123,12 @@ def print_feature_summary(features):
         ],
         "King Safety": [
             "white_king_safety", "black_king_safety",
-            "white_king_safety_min", "black_king_safety_min",
             "white_vulnerability_spikes", "black_vulnerability_spikes"
         ],
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
             "white_inaccuracy_count", "white_mistake_count", "white_blunder_count",
-            "white_sacrifice_count", "white_avg_eval_change", "white_eval_volatility",
+            "white_sacrifice_count", "white_avg_eval_change",
             "white_accuracy"
         ],
         "White Accuracy by Phase": [
@@ -1146,17 +1137,17 @@ def print_feature_summary(features):
         "Black Move Quality": [
             "black_brilliant_count", "black_great_count", "black_good_moves",
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
-            "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
+            "black_sacrifice_count", "black_avg_eval_change",
             "black_accuracy"
         ],
         "Black Accuracy by Phase": [
             "black_opening_accuracy", "black_middlegame_accuracy", "black_endgame_accuracy"
         ],
         "Move Statistics - White": [
-            "white_capture_frequency", "white_check_frequency", "white_castle_move"
+             "white_check_frequency", "white_castle_move"
         ],
         "Move Statistics - Black": [
-            "black_capture_frequency", "black_check_frequency", "black_castle_move"
+             "black_check_frequency", "black_castle_move"
         ]
     }
     
@@ -1318,14 +1309,6 @@ def print_move_statistics(result):
     print(f"{Fore.BLUE}{Style.BRIGHT}MOVE STATISTICS{Style.RESET_ALL}")
     print("="*80)
     
-    # Print capture frequency for white and black
-    if 'white_capture_frequency' in result:
-        capture_freq_white = result['white_capture_frequency']
-        print(f"  White Capture Frequency: {capture_freq_white:.2f}")
-    
-    if 'black_capture_frequency' in result:
-        capture_freq_black = result['black_capture_frequency']
-        print(f"  Black Capture Frequency: {capture_freq_black:.2f}")
     
     # Print check frequency for white and black
     if 'white_check_frequency' in result:

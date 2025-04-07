@@ -82,17 +82,20 @@ class FeatureExtractor:
             features.black_top_move_alignment = black_top_move_alignment
             features.white_top2_3_move_alignment = white_top2_3_move_alignment
             features.black_top2_3_move_alignment = black_top2_3_move_alignment
+            
+            # Calculate weighted engine alignment
+            white_weighted_align, black_weighted_align = self._calculate_weighted_engine_alignment(moves_list, evals)
+            features.white_weighted_alignment = white_weighted_align
+            features.black_weighted_alignment = black_weighted_align
+            
+            # Calculate critical position performance
+            white_critical_perf, black_critical_perf = self._calculate_critical_position_performance(evals, positions, moves_list)
+            features.white_critical_performance = white_critical_perf
+            features.black_critical_performance = black_critical_perf
         
         # Calculate material features - new addition
-        white_material_volatility, black_material_volatility, material_balance_std, white_piece_exchange_rate, black_piece_exchange_rate, white_pawn_exchange_rate, black_pawn_exchange_rate = self._calculate_material_features(positions)
-        # print(f"Material volatility white: {white_material_volatility}, Material volatility black: {black_material_volatility}, Material balance std: {material_balance_std}, Piece exchange rate white: {white_piece_exchange_rate}, Piece exchange rate black: {black_piece_exchange_rate}, Pawn exchange rate white: {white_pawn_exchange_rate}, Pawn exchange rate black: {black_pawn_exchange_rate}")
-        features.white_material_volatility = white_material_volatility
-        features.black_material_volatility = black_material_volatility
+        material_balance_std = self._calculate_material_features(positions)
         features.material_balance_std = material_balance_std
-        features.white_piece_exchange_rate = white_piece_exchange_rate
-        features.black_piece_exchange_rate = black_piece_exchange_rate
-        features.white_pawn_exchange_rate = white_pawn_exchange_rate
-        features.black_pawn_exchange_rate = black_pawn_exchange_rate
         
         # Calculate position control features - new addition
         white_space_advantage, black_space_advantage, \
@@ -107,8 +110,6 @@ class FeatureExtractor:
         king_safety_metrics = self._calculate_king_safety(positions)
         features.white_king_safety = king_safety_metrics['white']['avg_safety'] 
         features.black_king_safety = king_safety_metrics['black']['avg_safety']
-        features.white_king_safety_min = king_safety_metrics['white']['min_safety']
-        features.black_king_safety_min = king_safety_metrics['black']['min_safety']
         
         # Normalize vulnerability spikes by total moves
         features.white_vulnerability_spikes = king_safety_metrics['white']['vulnerability_spikes'] / total_moves if total_moves > 0 else 0.0
@@ -117,9 +118,8 @@ class FeatureExtractor:
         # Move statistics
         # Convert mainline_moves to a list before passing to _calculate_move_statistics
         moves_list = list(game.mainline_moves())
-        white_capture_frequency, black_capture_frequency, white_check_frequency, black_check_frequency, white_castle_move, black_castle_move = self._calculate_move_statistics(positions, moves_list)
-        features.white_capture_frequency = white_capture_frequency
-        features.black_capture_frequency = black_capture_frequency
+        white_check_frequency, black_check_frequency, white_castle_move, black_castle_move = self._calculate_move_statistics(positions, moves_list)
+
         features.white_check_frequency = white_check_frequency
         features.black_check_frequency = black_check_frequency
         
@@ -689,28 +689,11 @@ class FeatureExtractor:
                         logging.debug(f"Move {i//2 + 1}: Black captured White pawn")
         
         # Calculate final metrics
-        # Use max(1, len()) to avoid division by zero
-        white_material_volatility = sum(white_material_changes) / max(1, len(white_material_changes))
-        black_material_volatility = sum(black_material_changes) / max(1, len(black_material_changes))
         
         material_balance_std = float(np.std(material_balances)) if len(material_balances) > 1 else 0.0
         
-        white_piece_exchange_rate = white_piece_exchanges / max(1, white_move_count)
-        black_piece_exchange_rate = black_piece_exchanges / max(1, black_move_count)
         
-        white_pawn_exchange_rate = white_pawn_exchanges / max(1, white_move_count)
-        black_pawn_exchange_rate = black_pawn_exchanges / max(1, black_move_count)
-        
-        # Add summary logging
-        logging.debug(f"Material changes - White: {sum(white_material_changes)}, Black: {sum(black_material_changes)}")
-        logging.debug(f"Material volatility - White: {white_material_volatility}, Black: {black_material_volatility}")
-        logging.debug(f"Piece exchanges - White: {white_piece_exchanges}, Black: {black_piece_exchanges}")
-        logging.debug(f"Pawn exchanges - White: {white_pawn_exchanges}, Black: {black_pawn_exchanges}")
-        logging.debug(f"Material balance std: {material_balance_std}")
-        
-        return (white_material_volatility, black_material_volatility, material_balance_std,
-                white_piece_exchange_rate, black_piece_exchange_rate,
-                white_pawn_exchange_rate, black_pawn_exchange_rate)
+        return material_balance_std
         
     def _calculate_position_control_features(self, positions: List[chess.Board]) -> Tuple[float, float, float, float]:
         """
@@ -1092,11 +1075,9 @@ class FeatureExtractor:
         # Calculate evaluation metrics
         if white_eval_changes:
             features.white_avg_eval_change = float(np.mean(np.abs(white_eval_changes)))
-            features.white_eval_volatility = float(np.std(white_eval_changes))
         
         if black_eval_changes:
             features.black_avg_eval_change = float(np.mean(np.abs(black_eval_changes)))
-            features.black_eval_volatility = float(np.std(black_eval_changes))
     
     def _calculate_quality_metrics(self, evals: List[Info], features: FeatureVector, 
                                   positions: List[chess.Board] = None, 
@@ -1175,7 +1156,7 @@ class FeatureExtractor:
         features.black_blunder_count = black_counts[Judgment.BLUNDER]
         features.black_sacrifice_count = black_sacrifices
 
-    def _calculate_move_statistics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float, int, int]:
+    def _calculate_move_statistics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float]:
         """
         Calculate move-related statistics including capture frequency, check frequency,
         and castle timing for both players separately.
@@ -1185,12 +1166,12 @@ class FeatureExtractor:
             moves: List of moves played
             
         Returns:
-            Tuple of (white_capture_frequency, black_capture_frequency, 
+            Tuple of (
                     white_check_frequency, black_check_frequency, 
                     white_castle_move, black_castle_move)
         """
         if not positions or not moves:
-            return 0.0, 0.0, 0.0, 0.0, 0, 0
+            return 0.0, 0.0, 0.0, 0.0
         
         # Convert moves to a list if it's not already one
         if not isinstance(moves, list):
@@ -1255,15 +1236,13 @@ class FeatureExtractor:
                     black_check_count += 1
         
         # Calculate frequencies
-        white_capture_frequency = white_capture_count / total_white_moves if total_white_moves > 0 else 0.0
-        black_capture_frequency = black_capture_count / total_black_moves if total_black_moves > 0 else 0.0
         white_check_frequency = white_check_count / total_white_moves if total_white_moves > 0 else 0.0
         black_check_frequency = black_check_count / total_black_moves if total_black_moves > 0 else 0.0
         white_castle_move = white_castle_move / total_white_moves if total_white_moves > 0 else 0.0
         black_castle_move = black_castle_move / total_black_moves if total_black_moves > 0 else 0.0
         
         # Return actual move numbers for castling (not normalized)
-        return (white_capture_frequency, black_capture_frequency, 
+        return (
                 white_check_frequency, black_check_frequency, 
                 white_castle_move, black_castle_move)
     
@@ -1614,3 +1593,264 @@ class FeatureExtractor:
         black_prophylactic_frequency = black_prophylactic_count / total_black_moves if total_black_moves > 0 else 0.0
         
         return white_prophylactic_frequency, black_prophylactic_frequency
+
+    def _calculate_critical_position_performance(self, evals: List[Info], positions: List[chess.Board], 
+                                           moves: List[chess.Move]) -> Tuple[float, float]:
+        """
+        Calculate how well players perform in critical positions compared to routine positions.
+        
+        Args:
+            evals: List of position evaluations with engine recommendations
+            positions: List of board positions
+            moves: List of moves played in the game
+            
+        Returns:
+            Tuple of (white_critical_performance, black_critical_performance)
+        """
+        if not evals or len(evals) < 2 or not positions or not moves:
+            return 0.0, 0.0
+        
+        # Identify critical positions (large eval swings, complex tactics, etc.)
+        critical_positions = []
+        routine_positions = []
+        
+        for i in range(1, len(evals)):
+            if i >= len(positions) or i-1 >= len(moves):
+                continue
+                
+            prev_eval, curr_eval = evals[i-1], evals[i]
+            is_critical = False
+            
+            # Check if we have CP values to compare
+            prev_cp = prev_eval.cp if hasattr(prev_eval, 'cp') and prev_eval.cp is not None else None
+            curr_cp = curr_eval.cp if hasattr(curr_eval, 'cp') and curr_eval.cp is not None else None
+            
+            if prev_cp is not None and curr_cp is not None:
+                # Large eval swing (more than 1 pawn) indicates critical position
+                if abs(curr_cp - prev_cp) > 100:
+                    is_critical = True
+            
+            # Check if this is a tactical position (lots of captures possible)
+            if not is_critical and i < len(positions):
+                board = positions[i]
+                captures = 0
+                for m in board.legal_moves:
+                    if board.is_capture(m):
+                        captures += 1
+                
+                # If multiple captures are possible, it's a tactical position
+                if captures >= 3:
+                    is_critical = True
+            
+            # Store position index as critical or routine
+            if is_critical:
+                critical_positions.append(i-1)
+            else:
+                routine_positions.append(i-1)
+        
+        # Now calculate move accuracy for critical and routine positions
+        white_critical_acc = []
+        black_critical_acc = []
+        white_routine_acc = []
+        black_routine_acc = []
+        
+        # Calculate move accuracies
+        move_accuracies = self._calculate_move_accuracies(positions, evals, moves)
+        
+        for i, acc_data in enumerate(move_accuracies):
+            is_white = acc_data.get("player") == "white"
+            accuracy = acc_data.get("accuracy", 0.0)
+            
+            if i in critical_positions:
+                if is_white:
+                    white_critical_acc.append(accuracy)
+                else:
+                    black_critical_acc.append(accuracy)
+            elif i in routine_positions:
+                if is_white:
+                    white_routine_acc.append(accuracy)
+                else:
+                    black_routine_acc.append(accuracy)
+        
+        # Calculate average accuracies
+        white_critical_avg = sum(white_critical_acc) / max(1, len(white_critical_acc))
+        black_critical_avg = sum(black_critical_acc) / max(1, len(black_critical_acc))
+        white_routine_avg = sum(white_routine_acc) / max(1, len(white_routine_acc))
+        black_routine_avg = sum(black_routine_acc) / max(1, len(black_routine_acc))
+        
+        # Calculate performance difference (positive means better in critical positions)
+        white_critical_performance = white_critical_avg - white_routine_avg
+        black_critical_performance = black_critical_avg - black_routine_avg
+        
+        return white_critical_performance, black_critical_performance
+
+    def _calculate_weighted_engine_alignment(self, moves: List[chess.Move], evals: List[Info]) -> Tuple[float, float]:
+        """
+        Calculate engine alignment weighted by evaluation difference between top move and played move.
+        
+        Args:
+            moves: List of moves played in the game
+            evals: List of position evaluations with engine recommendations
+            
+        Returns:
+            Tuple of (white_weighted_alignment, black_weighted_alignment)
+        """
+        if not moves or not evals or len(evals) < 2:
+            return 0.0, 0.0
+        
+        white_alignment_score = 0.0
+        black_alignment_score = 0.0
+        white_moves = 0
+        black_moves = 0
+        
+        for i, move in enumerate(moves):
+            if i >= len(evals):
+                break
+                
+            eval_info = evals[i]
+            is_white = i % 2 == 0
+            move_uci = move.uci()
+            
+            # Skip if no multipv data
+            if not hasattr(eval_info, 'multipv') or not eval_info.multipv or len(eval_info.multipv) < 1:
+                continue
+                
+            # Check the structure of multipv data
+            if not isinstance(eval_info.multipv[0], dict):
+                continue
+            
+            # Get top move evaluation
+            top_move_eval = None
+            if 'score' in eval_info.multipv[0]:
+                score = eval_info.multipv[0]['score']
+                if isinstance(score, dict):
+                    if 'cp' in score:
+                        top_move_eval = score['cp']
+                    elif 'mate' in score:
+                        # Convert mate score to high CP value
+                        mate_val = score['mate']
+                        top_move_eval = 10000 if mate_val > 0 else -10000
+            
+            if top_move_eval is None:
+                continue
+                
+            # Find played move in engine moves
+            played_move_eval = None
+            for mv_data in eval_info.multipv:
+                if isinstance(mv_data, dict) and 'move' in mv_data and mv_data['move'] == move_uci:
+                    if 'score' in mv_data and isinstance(mv_data['score'], dict):
+                        score = mv_data['score']
+                        if 'cp' in score:
+                            played_move_eval = score['cp']
+                        elif 'mate' in score:
+                            # Convert mate score to high CP value
+                            mate_val = score['mate']
+                            played_move_eval = 10000 if mate_val > 0 else -10000
+                    break
+            
+            # If played move wasn't in engine moves, skip
+            if played_move_eval is None:
+                continue
+                
+            # Calculate alignment score based on evaluation difference
+            eval_diff = abs(top_move_eval - played_move_eval)
+            
+            # Use sigmoid-like function to convert eval diff to 0-1 score
+            # 0 diff = 1.0 (perfect), large diff approaches 0.0
+            alignment_score = 1.0 / (1.0 + eval_diff / 50.0)  # 50cp diff gives 0.5 score
+            
+            # Add to appropriate counter
+            if is_white:
+                white_alignment_score += alignment_score
+                white_moves += 1
+            else:
+                black_alignment_score += alignment_score
+                black_moves += 1
+        
+        # Calculate averages
+        white_weighted_alignment = white_alignment_score / max(1, white_moves)
+        black_weighted_alignment = black_alignment_score / max(1, black_moves)
+        
+        return white_weighted_alignment, black_weighted_alignment
+
+    def _calculate_move_accuracies(self, positions: List[chess.Board], evals: List[Info], moves: List[chess.Move]) -> List[Dict[str, float]]:
+        """
+        Calculate accuracy for each move based on the change in winning chances.
+        
+        Args:
+            positions: List of chess board positions
+            evals: List of evaluation information for each position
+            moves: List of moves played in the game
+            
+        Returns:
+            List of dictionaries containing move accuracy information
+        """
+        move_accuracies = []
+        
+        # We need at least 2 positions to calculate accuracy for 1 move
+        if len(positions) < 2 or len(evals) < 2 or not moves:
+            return move_accuracies
+                
+        for i in range(len(positions) - 1):  # We calculate accuracy for each move except the last position
+            # Skip if we don't have the move for this position
+            if i >= len(moves):
+                continue
+                    
+            # Determine whose move it was
+            player_color = "white" if positions[i].turn == chess.WHITE else "black"
+            
+            # Get evaluation before the move
+            eval_before = evals[i]
+            eval_after = evals[i+1]
+            
+            # Convert the eval format from {'type': 'cp', 'value': X} to {'cp': X} or {'mate': X}
+            if hasattr(eval_before, 'eval') and eval_before.eval:
+                eval_type_before = eval_before.eval.get('type')
+                eval_value_before = eval_before.eval.get('value')
+                score_dict_before = {eval_type_before: eval_value_before} if eval_type_before and eval_value_before is not None else {"cp": 0}
+            else:
+                score_dict_before = {"cp": 0}
+                    
+            if hasattr(eval_after, 'eval') and eval_after.eval:
+                eval_type_after = eval_after.eval.get('type')
+                eval_value_after = eval_after.eval.get('value')
+                score_dict_after = {eval_type_after: eval_value_after} if eval_type_after and eval_value_after is not None else {"cp": 0}
+            else:
+                score_dict_after = {"cp": 0}
+            
+            # Get win percentages from the player's perspective
+            win_percent_before = MoveAnalyzer.pov_chances(player_color, score_dict_before)
+            win_percent_after = MoveAnalyzer.pov_chances(player_color, score_dict_after)
+            
+            # Check if the move was a top engine move
+            is_top_move = False
+            if hasattr(eval_before, 'variation') and eval_before.variation:
+                # Get the actual move played
+                actual_move = moves[i]
+                actual_move_uci = actual_move.uci()
+                
+                # Check if the move played matches the top engine move
+                # Handle both cases where variation is a list of strings or dictionaries
+                if eval_before.variation and len(eval_before.variation) > 0:
+                    if isinstance(eval_before.variation[0], dict) and "Move" in eval_before.variation[0]:
+                        top_engine_move = eval_before.variation[0]["Move"]
+                    elif isinstance(eval_before.variation[0], str):
+                        top_engine_move = eval_before.variation[0]
+                    else:
+                        top_engine_move = None
+                    
+                    is_top_move = actual_move_uci == top_engine_move
+            
+            # Calculate accuracy for this move
+            accuracy = MoveAnalyzer.calculate_move_accuracy(win_percent_before, win_percent_after, is_top_move)
+            
+            move_accuracies.append({
+                "move_number": (i // 2) + 1 if i % 2 == 0 else i // 2 + 1,  # Chess move numbering
+                "player": player_color,
+                "accuracy": accuracy,
+                "win_percent_before": win_percent_before * 100,  # Convert to percentage
+                "win_percent_after": win_percent_after * 100,    # Convert to percentage
+                "is_top_move": is_top_move,  # Add this information to the output
+            })
+                
+        return move_accuracies

@@ -122,8 +122,6 @@ def print_king_safety_analysis(analysis_result):
     # Display the king safety metrics
     print(f"White King Safety (Average): {format_safety(features.white_king_safety)}")
     print(f"Black King Safety (Average): {format_safety(features.black_king_safety)}")
-    print(f"White King Safety (Minimum): {format_safety(features.white_king_safety_min)}")
-    print(f"Black King Safety (Minimum): {format_safety(features.black_king_safety_min)}")
     print(f"White Vulnerability Spikes: {format_vulnerability(features.white_vulnerability_spikes)}")
     print(f"Black Vulnerability Spikes: {format_vulnerability(features.black_vulnerability_spikes)}")
     
@@ -313,13 +311,13 @@ def print_feature_summary(features):
         "White Move Quality": [
             "white_brilliant_count", "white_great_count", "white_good_moves",
             "white_inaccuracy_count", "white_mistake_count", "white_blunder_count",
-            "white_sacrifice_count", "white_avg_eval_change", "white_eval_volatility",
+            "white_sacrifice_count", "white_avg_eval_change",
             "white_accuracy"
         ],
         "Black Move Quality": [
             "black_brilliant_count", "black_great_count", "black_good_moves",
             "black_inaccuracy_count", "black_mistake_count", "black_blunder_count",
-            "black_sacrifice_count", "black_avg_eval_change", "black_eval_volatility",
+            "black_sacrifice_count", "black_avg_eval_change",
             "black_accuracy"
         ],
         "Strategic Orientation": [
@@ -432,9 +430,6 @@ def print_move_statistics(analysis_result):
     print(f"{Fore.BLUE}{Style.BRIGHT}MOVE STATISTICS{Style.RESET_ALL}")
     print("="*80)
     
-    # Display capture frequencies
-    print(f"White Capture Frequency: {features.white_capture_frequency:.2f}")
-    print(f"Black Capture Frequency: {features.black_capture_frequency:.2f}")
     
     # Display check frequencies
     print(f"White Check Frequency: {features.white_check_frequency:.2f}")
