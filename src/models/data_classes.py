@@ -181,5 +181,46 @@ class FeatureVector:
     white_sharpness: float = 0.0                # Cumulative sharpness score for white positions
     black_sharpness: float = 0.0                # Cumulative sharpness score for black positions
     
+    #--------------------------------------------------------------------------
+    # ACTIVIST DISTINGUISHING FEATURES
+    #--------------------------------------------------------------------------
+    white_initiative_ratio: float = 0.0         # Frequency of initiative-taking moves (high for Activist)
+    black_initiative_ratio: float = 0.0
+    white_forcing_sequence_length: float = 0.0  # Length of forcing move sequences (high for Activist)
+    black_forcing_sequence_length: float = 0.0
+    white_counterplay_ratio: float = 0.0        # Frequency of counterplay creation despite disadvantage (high for Activist)
+    black_counterplay_ratio: float = 0.0
+    
+    #--------------------------------------------------------------------------
+    # THEORIST DISTINGUISHING FEATURES
+    #--------------------------------------------------------------------------
+    opening_theory_adherence: float = 0.0       # How closely opening follows established theory (high for Theorist)
+    white_structural_consistency: float = 0.0   # Consistency of pawn structure (high for Theorist)
+    black_structural_consistency: float = 0.0
+    white_pattern_adherence: float = 0.0        # Adherence to common strategic patterns (high for Theorist)
+    black_pattern_adherence: float = 0.0
+    
+    #--------------------------------------------------------------------------
+    # REFLECTOR DISTINGUISHING FEATURES
+    #--------------------------------------------------------------------------
+    white_piece_harmony: float = 0.0            # Overall piece coordination score (high for Reflector)
+    black_piece_harmony: float = 0.0
+    white_prophylactic_ratio: float = 0.0       # Frequency of prophylactic moves (high for Reflector)
+    black_prophylactic_ratio: float = 0.0
+    white_exchange_sacrifice_ratio: float = 0.0  # Frequency of exchange sacrifices (high for Reflector)
+    black_exchange_sacrifice_ratio: float = 0.0
+    
+    #--------------------------------------------------------------------------
+    # PRAGMATIST DISTINGUISHING FEATURES
+    #--------------------------------------------------------------------------
+    white_concrete_calculation: float = 0.0     # Quality of concrete calculation (high for Pragmatist)
+    black_concrete_calculation: float = 0.0
+    white_defensive_precision: float = 0.0      # Precision in defensive positions (high for Pragmatist)
+    black_defensive_precision: float = 0.0
+    white_objective_decision_ratio: float = 0.0  # Frequency of objective, principle-based choices (high for Pragmatist)
+    black_objective_decision_ratio: float = 0.0
+    white_evaluation_clarity: float = 0.0       # Stability of evaluation changes (high for Pragmatist)
+    black_evaluation_clarity: float = 0.0
+    
     def to_array(self) -> np.ndarray:
         return np.array(list(self.__dict__.values()), dtype=np.float32)

@@ -8,12 +8,14 @@ from analysis.phase_detector import GamePhaseDetector
 from analysis.move_analyzer import MoveAnalyzer
 from analysis.king_safety import KingSafetyEvaluator
 from analysis.piece_mobility import PieceMobility
+from features.player_type_features import PlayerTypeFeatures
 
 class FeatureExtractor:
     def __init__(self):
         self.phase_detector = GamePhaseDetector()
         self.king_safety_evaluator = KingSafetyEvaluator()
         self.piece_mobility = PieceMobility()
+        self.player_type_features = PlayerTypeFeatures(self)
     def extract_features(self, game: chess.pgn.Game, evals: Optional[List[Info]] = None, judgments: Optional[List[Judgment]] = None) -> FeatureVector:
         """
         Extract all features from a game
@@ -168,6 +170,27 @@ class FeatureExtractor:
         white_prophylactic_frequency, black_prophylactic_frequency = self._calculate_prophylactic_moves(positions, moves_list)
         features.white_prophylactic_frequency = white_prophylactic_frequency
         features.black_prophylactic_frequency = black_prophylactic_frequency
+        
+        # Add opening novelty code here if available
+        if 'ECO' in game.headers:
+            eco_code = game.headers['ECO']
+            move_list = [move.uci() for move in moves_list]
+            opening_novelty_score, opening_name, matched_eco, matching_plies = self.calculate_opening_novelty_score(
+                eco_code, move_list, features.opening_length, total_moves
+            )
+            features.opening_novelty_score = opening_novelty_score
+            features.opening_name = opening_name
+        
+        # Extract player type features
+        if positions and moves_list and evals and len(evals) > 1:
+            # Get distinctive features from PlayerTypeFeatures
+            distinctive_features = self.player_type_features.extract_distinctive_features(
+                positions, moves_list, evals, game, mg_start, eg_start, total_moves
+            )
+            
+            # Update feature vector with player type features
+            for key, value in distinctive_features.items():
+                setattr(features, key, value)
         
         return features
     

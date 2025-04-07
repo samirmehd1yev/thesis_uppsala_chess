@@ -1083,6 +1083,10 @@ def print_game_analysis(result, game_data):
     # Print move statistics if available
     print_move_statistics(result)
     
+    # Print player style analysis if available
+    if 'white_initiative_ratio' in result and 'black_initiative_ratio' in result:
+        print_player_type_analysis(result)
+    
     # Print feature summary
     print_feature_summary(result)
     
@@ -1148,6 +1152,33 @@ def print_feature_summary(features):
         ],
         "Move Statistics - Black": [
              "black_check_frequency", "black_castle_move"
+        ],
+        # New Player Type Features
+        "Activist Style - White": [
+            "white_initiative_ratio", "white_forcing_sequence_length", "white_counterplay_ratio"
+        ],
+        "Activist Style - Black": [
+            "black_initiative_ratio", "black_forcing_sequence_length", "black_counterplay_ratio"
+        ],
+        "Theorist Style - White": [
+            "opening_theory_adherence", "white_structural_consistency", "white_pattern_adherence"
+        ],
+        "Theorist Style - Black": [
+            "opening_theory_adherence", "black_structural_consistency", "black_pattern_adherence"
+        ],
+        "Reflector Style - White": [
+            "white_piece_harmony", "white_prophylactic_ratio", "white_exchange_sacrifice_ratio"
+        ],
+        "Reflector Style - Black": [
+            "black_piece_harmony", "black_prophylactic_ratio", "black_exchange_sacrifice_ratio"
+        ],
+        "Pragmatist Style - White": [
+            "white_concrete_calculation", "white_defensive_precision", 
+            "white_objective_decision_ratio", "white_evaluation_clarity"
+        ],
+        "Pragmatist Style - Black": [
+            "black_concrete_calculation", "black_defensive_precision", 
+            "black_objective_decision_ratio", "black_evaluation_clarity"
         ]
     }
     
@@ -1356,6 +1387,158 @@ def print_move_statistics(result):
             print(f"  Black Castling: Move {castle_black}")
         else:
             print(f"  Black Castling: Did not castle")
+
+def print_player_type_analysis(features):
+    """Print an analysis of player types based on the extracted features"""
+    try:
+        from colorama import Fore, Back, Style, init
+        init()
+    except ImportError:
+        class DummyFore:
+            def __getattr__(self, name):
+                return ""
+        class DummyStyle:
+            def __getattr__(self, name):
+                return ""
+        Fore = DummyFore()
+        Style = DummyStyle()
+    
+    print("\n" + "="*80)
+    print(f"{Fore.BLUE}{Style.BRIGHT}PLAYER STYLE ANALYSIS{Style.RESET_ALL}")
+    print("="*80)
+    
+    # Check if player style features are available
+    if 'white_initiative_ratio' not in features or 'black_initiative_ratio' not in features:
+        print("Player style features not available.")
+        return
+    
+    # Calculate style scores for White
+    white_activist_score = (
+        features.get('white_initiative_ratio', 0) * 0.4 +
+        features.get('white_forcing_sequence_length', 0) * 0.3 +
+        features.get('white_counterplay_ratio', 0) * 0.3
+    ) * 100
+    
+    white_theorist_score = (
+        features.get('opening_theory_adherence', 0) * 0.4 +
+        features.get('white_structural_consistency', 0) * 0.3 +
+        features.get('white_pattern_adherence', 0) * 0.3
+    ) * 100
+    
+    white_reflector_score = (
+        features.get('white_piece_harmony', 0) * 0.4 +
+        features.get('white_prophylactic_ratio', 0) * 0.3 +
+        features.get('white_exchange_sacrifice_ratio', 0) * 0.3
+    ) * 100
+    
+    white_pragmatist_score = (
+        features.get('white_concrete_calculation', 0) * 0.3 +
+        features.get('white_defensive_precision', 0) * 0.4 +
+        features.get('white_objective_decision_ratio', 0) * 0.2 +
+        features.get('white_evaluation_clarity', 0) * 0.1
+    ) * 100
+    
+    # Calculate style scores for Black
+    black_activist_score = (
+        features.get('black_initiative_ratio', 0) * 0.4 +
+        features.get('black_forcing_sequence_length', 0) * 0.3 +
+        features.get('black_counterplay_ratio', 0) * 0.3
+    ) * 100
+    
+    black_theorist_score = (
+        features.get('opening_theory_adherence', 0) * 0.4 +
+        features.get('black_structural_consistency', 0) * 0.3 +
+        features.get('black_pattern_adherence', 0) * 0.3
+    ) * 100
+    
+    black_reflector_score = (
+        features.get('black_piece_harmony', 0) * 0.4 +
+        features.get('black_prophylactic_ratio', 0) * 0.3 +
+        features.get('black_exchange_sacrifice_ratio', 0) * 0.3
+    ) * 100
+    
+    black_pragmatist_score = (
+        features.get('black_concrete_calculation', 0) * 0.3 +
+        features.get('black_defensive_precision', 0) * 0.4 +
+        features.get('black_objective_decision_ratio', 0) * 0.2 +
+        features.get('black_evaluation_clarity', 0) * 0.1
+    ) * 100
+    
+    # Normalize scores
+    white_total = max(1, white_activist_score + white_theorist_score + white_reflector_score + white_pragmatist_score)
+    black_total = max(1, black_activist_score + black_theorist_score + black_reflector_score + black_pragmatist_score)
+    
+    white_activist_pct = (white_activist_score / white_total) * 100
+    white_theorist_pct = (white_theorist_score / white_total) * 100
+    white_reflector_pct = (white_reflector_score / white_total) * 100
+    white_pragmatist_pct = (white_pragmatist_score / white_total) * 100
+    
+    black_activist_pct = (black_activist_score / black_total) * 100
+    black_theorist_pct = (black_theorist_score / black_total) * 100
+    black_reflector_pct = (black_reflector_score / black_total) * 100
+    black_pragmatist_pct = (black_pragmatist_score / black_total) * 100
+    
+    # Determine primary and secondary styles
+    white_styles = [
+        ("Activist", white_activist_pct),
+        ("Theorist", white_theorist_pct),
+        ("Reflector", white_reflector_pct),
+        ("Pragmatist", white_pragmatist_pct)
+    ]
+    white_styles.sort(key=lambda x: x[1], reverse=True)
+    
+    black_styles = [
+        ("Activist", black_activist_pct),
+        ("Theorist", black_theorist_pct),
+        ("Reflector", black_reflector_pct),
+        ("Pragmatist", black_pragmatist_pct)
+    ]
+    black_styles.sort(key=lambda x: x[1], reverse=True)
+    
+    # Print style analysis
+    print(f"{Fore.WHITE}{Style.BRIGHT}White Player Style:{Style.RESET_ALL}")
+    print(f"  Primary: {Fore.CYAN}{white_styles[0][0]}{Style.RESET_ALL} ({white_styles[0][1]:.1f}%)")
+    print(f"  Secondary: {Fore.CYAN}{white_styles[1][0]}{Style.RESET_ALL} ({white_styles[1][1]:.1f}%)")
+    print(f"  Style Breakdown:")
+    print(f"    - Activist: {white_activist_pct:.1f}% (Dynamic, tactical, initiative-driven)")
+    print(f"    - Theorist: {white_theorist_pct:.1f}% (Principled, structured, theoretical)")
+    print(f"    - Reflector: {white_reflector_pct:.1f}% (Subtle, positional, harmonious)")
+    print(f"    - Pragmatist: {white_pragmatist_pct:.1f}% (Calculating, practical, concrete)")
+    
+    print(f"\n{Fore.MAGENTA}{Style.BRIGHT}Black Player Style:{Style.RESET_ALL}")
+    print(f"  Primary: {Fore.CYAN}{black_styles[0][0]}{Style.RESET_ALL} ({black_styles[0][1]:.1f}%)")
+    print(f"  Secondary: {Fore.CYAN}{black_styles[1][0]}{Style.RESET_ALL} ({black_styles[1][1]:.1f}%)")
+    print(f"  Style Breakdown:")
+    print(f"    - Activist: {black_activist_pct:.1f}% (Dynamic, tactical, initiative-driven)")
+    print(f"    - Theorist: {black_theorist_pct:.1f}% (Principled, structured, theoretical)")
+    print(f"    - Reflector: {black_reflector_pct:.1f}% (Subtle, positional, harmonious)")
+    print(f"    - Pragmatist: {black_pragmatist_pct:.1f}% (Calculating, practical, concrete)")
+    
+    # Print style descriptions
+    print(f"\n{Fore.YELLOW}{Style.BRIGHT}Player Style Descriptions:{Style.RESET_ALL}")
+    print(f"  {Fore.CYAN}Activist:{Style.RESET_ALL} Dynamic player who values initiative and tactical play.")
+    print(f"    • Seeks complications and tactical opportunities")
+    print(f"    • Willing to sacrifice material for initiative")
+    print(f"    • Good at finding counterplay in difficult positions")
+    print(f"    • Examples: Mikhail Tal, Garry Kasparov, Alexei Shirov")
+    
+    print(f"\n  {Fore.CYAN}Theorist:{Style.RESET_ALL} Principled player who values preparation and structure.")
+    print(f"    • Strong opening preparation and theory knowledge")
+    print(f"    • Maintains consistent pawn structures")
+    print(f"    • Follows established principles and patterns")
+    print(f"    • Examples: Wilhelm Steinitz, Vladimir Kramnik, Anatoly Karpov")
+    
+    print(f"\n  {Fore.CYAN}Reflector:{Style.RESET_ALL} Positional player who values harmony and prophylaxis.")
+    print(f"    • Focuses on piece coordination and harmony")
+    print(f"    • Makes preventive moves before threats materialize")
+    print(f"    • Willing to make positional exchanges and sacrifices")
+    print(f"    • Examples: Tigran Petrosian, Aron Nimzowitsch, Bent Larsen")
+    
+    print(f"\n  {Fore.CYAN}Pragmatist:{Style.RESET_ALL} Practical player who values concrete calculation and defense.")
+    print(f"    • Strong defensive skills and practical decision-making")
+    print(f"    • Makes objective, principle-based choices")
+    print(f"    • Excellent at calculated evaluations and endgames")
+    print(f"    • Examples: Emanuel Lasker, Mikhail Botvinnik, Magnus Carlsen")
 
 if __name__ == "__main__":
     main()
