@@ -65,10 +65,14 @@ class FeatureExtractor:
         
         # Calculate development metrics - new
         moves_list = list(game.mainline_moves())
-        white_minor_piece_development, black_minor_piece_development, \
-        white_queen_development, black_queen_development = self._calculate_development_metrics(positions, moves_list)
+        white_minor_piece_development, black_minor_piece_development, white_queen_development, black_queen_development, white_queen_lifetime, black_queen_lifetime = self._calculate_development_metrics(positions, moves_list)
+        
+        # print(f"white queen development: {white_queen_development}")
+        # print(f"black queen development: {black_queen_development}")
         
         # Normalize development metrics by total moves
+        features.white_queen_lifetime = white_queen_lifetime / total_moves if total_moves > 0 else 0.0
+        features.black_queen_lifetime = black_queen_lifetime / total_moves if total_moves > 0 else 0.0
         features.white_minor_piece_development = white_minor_piece_development / total_moves if total_moves > 0 else 0.0
         features.black_minor_piece_development = black_minor_piece_development / total_moves if total_moves > 0 else 0.0
         features.white_queen_development = white_queen_development / total_moves if total_moves > 0 else 0.0
@@ -801,7 +805,7 @@ class FeatureExtractor:
         # Return average number of squares controlled per pawn
         return len(controlled_squares) / pawn_count
         
-    def _calculate_development_metrics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float]:
+    def _calculate_development_metrics(self, positions: List[chess.Board], moves: List[chess.Move]) -> Tuple[float, float, float, float, float, float]:
         """
         Calculate development metrics for both players.
         
@@ -813,10 +817,7 @@ class FeatureExtractor:
             Tuple of development metrics for white and black
         """
         if not positions or len(positions) < 2 or not moves:
-            return 0.0, 0.0, 0.0, 0.0
-        
-        # Initial position
-        initial_board = chess.Board()
+            return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         
         # Track development of pieces
         white_pieces_developed = {
@@ -842,15 +843,26 @@ class FeatureExtractor:
         # Track first queen move
         white_queen_move = 0
         black_queen_move = 0
+
+        # Track when queens are captured
+        white_queen_captured_move = 0
+        black_queen_captured_move = 0
+        
+        # Define initial queen squares
+        white_queen_initial = chess.D1
+        black_queen_initial = chess.D8
         
         # Process each move and position
-        for move_idx, (move, board) in enumerate(zip(moves, positions[1:])):  # Skip initial position
-            move_number = move_idx // 2 + 1  # Convert to move number (1-indexed)
-            is_white_move = move_idx % 2 == 0
+        board = chess.Board()  # Start from initial position
+        
+        for move_idx, move in enumerate(moves):
+            move_number = (move_idx // 2) + 1  # Convert to move number (1-indexed)
+            is_white = move_idx % 2 == 0
             
             # Get piece type and from/to squares
-            piece = board.piece_at(move.to_square)
+            piece = board.piece_at(move.from_square)
             if not piece:
+                board.push(move)
                 continue
                 
             piece_type = piece.piece_type
@@ -858,7 +870,7 @@ class FeatureExtractor:
             to_square = move.to_square
             
             # Process development based on piece type and color
-            if is_white_move:
+            if is_white:
                 # White's move
                 if piece_type == chess.KNIGHT:
                     # Determine kingside/queenside knight
@@ -883,10 +895,14 @@ class FeatureExtractor:
                             white_pieces_developed['bishop_kingside'] = True
                 
                 elif piece_type == chess.QUEEN:
-                    # Track first queen move
-                    if not white_pieces_developed['queen']:
-                        white_pieces_developed['queen'] = True
+                    # Track first queen move from initial square
+                    if from_square == white_queen_initial and white_queen_move == 0:
                         white_queen_move = move_number
+
+                # Check if black's queen was captured
+                captured_piece = board.piece_at(to_square)
+                if captured_piece and captured_piece.piece_type == chess.QUEEN and captured_piece.color == chess.BLACK:
+                    black_queen_captured_move = move_number
             else:
                 # Black's move
                 if piece_type == chess.KNIGHT:
@@ -912,10 +928,14 @@ class FeatureExtractor:
                             black_pieces_developed['bishop_kingside'] = True
                 
                 elif piece_type == chess.QUEEN:
-                    # Track first queen move
-                    if not black_pieces_developed['queen']:
-                        black_pieces_developed['queen'] = True
+                    # Track first queen move from initial square
+                    if from_square == black_queen_initial and black_queen_move == 0:
                         black_queen_move = move_number
+
+                # Check if white's queen was captured
+                captured_piece = board.piece_at(to_square)
+                if captured_piece and captured_piece.piece_type == chess.QUEEN and captured_piece.color == chess.WHITE:
+                    white_queen_captured_move = move_number
             
             # Check if all minor pieces are developed
             white_minor_pieces = [
@@ -937,23 +957,39 @@ class FeatureExtractor:
             
             if all(black_minor_pieces) and black_all_minor_pieces_move == 0:
                 black_all_minor_pieces_move = move_number
+                
+            # Update board with the move
+            board.push(move)
         
-        # If pieces were never developed, use a high value (e.g., total moves + 10)
+        # If pieces were never developed, use total moves
         total_moves = len(moves) // 2
         if white_all_minor_pieces_move == 0:
-            white_all_minor_pieces_move = total_moves + 10
+            white_all_minor_pieces_move = total_moves
         if black_all_minor_pieces_move == 0:
-            black_all_minor_pieces_move = total_moves + 10
-        
-        # If queen was never moved, set to a high value
+            black_all_minor_pieces_move = total_moves
         if white_queen_move == 0:
-            white_queen_move = total_moves + 10
+            white_queen_move = total_moves
         if black_queen_move == 0:
-            black_queen_move = total_moves + 10
+            black_queen_move = total_moves
+        if white_queen_captured_move == 0:
+            white_queen_captured_move = total_moves
+        if black_queen_captured_move == 0:
+            black_queen_captured_move = total_moves
+        
+        # # Add debug prints
+        # print(f"White queen initial square: {chess.square_name(white_queen_initial)}")
+        # print(f"Black queen initial square: {chess.square_name(black_queen_initial)}")
+        # print(f"White queen first move: {white_queen_move}")
+        # print(f"Black queen first move: {black_queen_move}")
+        # print(f"White all minor pieces developed: {white_all_minor_pieces_move}")
+        # print(f"Black all minor pieces developed: {black_all_minor_pieces_move}")
+        # print(f"White queen captured: {white_queen_captured_move}")
+        # print(f"Black queen captured: {black_queen_captured_move}")
         
         return (
             white_all_minor_pieces_move, black_all_minor_pieces_move,
-            white_queen_move, black_queen_move
+            white_queen_move, black_queen_move,
+            white_queen_captured_move, black_queen_captured_move
         )
         
     def _calculate_engine_move_alignment(self, moves: List[chess.Move], evals: List[Info]) -> Tuple[float, float, float, float]:

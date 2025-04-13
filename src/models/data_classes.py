@@ -78,6 +78,8 @@ class FeatureVector:
     white_minor_piece_development: float = 0.0  # Ratio of game completed when all minor pieces are developed (0-1)
     black_minor_piece_development: float = 0.0  # Ratio of game completed when all minor pieces are developed (0-1)
     white_queen_development: float = 0.0        # Ratio of game completed at first queen move (0-1)
+    white_queen_lifetime: float = 0.0        # Ratio of game completed when queen is captured (0-1)
+    black_queen_lifetime: float = 0.0        # Ratio of game completed when queen is captured (0-1)
     black_queen_development: float = 0.0        # Ratio of game completed at first queen move (0-1)
     white_castle_move: float = 0.0              # Ratio of game completed when castled (0 if never)
     black_castle_move: float = 0.0              # Ratio of game completed when castled (0 if never)

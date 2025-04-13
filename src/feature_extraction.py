@@ -792,10 +792,12 @@ def main():
         if args.debug:
             logger.info("Debug mode: Reading entire CSV file")
             df = pd.read_csv(input_csv)
-            row_to_process = 11 # Default row number for debug mode
+            row_to_process = 0
             logger.info(f"Processing row {row_to_process} in debug mode")
             if row_to_process < len(df):
                 game_row = df.iloc[row_to_process].to_dict()
+                # print mvoes
+                print(f"Moves: {game_row['moves']}")
                 result = extractor.process_game(game_row)
                 processed_games = 1 if result is not None else 0
                 processed_chunk = [result] if result is not None else []
@@ -1120,6 +1122,7 @@ def print_feature_summary(features):
             "white_piece_mobility_avg", "black_piece_mobility_avg",
             "white_center_control_avg", "black_center_control_avg",
             "white_space_advantage", "black_space_advantage",
+            "white_queen_lifetime", "black_queen_lifetime",
         ],
         "King Safety": [
             "white_king_safety", "black_king_safety",
